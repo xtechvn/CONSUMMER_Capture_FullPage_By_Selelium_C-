@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "ConsummerScreenPageBot": {
+      "commandName": "Project"
+    },
+    "Container (Dockerfile)": {
+      "commandName": "Docker"
+    }
+  }
+}

@@ -1,0 +1,1457 @@
+[1761824289.675][INFO]: Starting ChromeDriver 142.0.7444.59 (4b8153ab58d3c3f4c9f7e4baad9616ecf80db5fa-refs/branch-heads/7444_52@{#4}) on port 8886
+[1761824289.675][INFO]: Please see https://chromedriver.chromium.org/security-considerations for suggestions on keeping ChromeDriver safe.
+[1761824289.683][INFO]: ChromeDriver was started successfully on port 8886
+[1761824290.228][INFO]: [f6ea54244227825c6675c9ec474484f1] COMMAND InitSession {
+   "capabilities": {
+      "firstMatch": [ {
+         "acceptInsecureCerts": true,
+         "browserName": "chrome",
+         "goog:chromeOptions": {
+            "args": [ "--start-maximized", "--user-data-dir=D:\\PROJECT\\SBA\\CONSUM_SCREEN_PAGE_BY_SE_C\\ConsummerScreenPageBot\\\\chrome-profile", "--disable-blink-features=AutomationControlled", "--disable-infobars", "--no-first-run", "--no-default-browser-check", "--disable-background-networking", "--disable-extensions", "--disable-sync", "--disable-component-update", "--disable-client-side-phishing-detection", "--disable-domain-reliability", "--disable-renderer-backgrounding", "--remote-allow-origins=*", "--disable-features=IsolateOrigins,site-per-process", "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36" ],
+            "binary": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+            "excludeSwitches": [ "enable-automation" ],
+            "prefs": {
+               "credentials_enable_service": false,
+               "profile.password_manager_enabled": false
+            }
+         },
+         "pageLoadStrategy": "eager"
+      } ]
+   }
+}
+[1761824290.230][INFO]: Populating Preferences file: {
+   "NewTabPage": {
+      "PrevNavigationTime": "13406297611322000"
+   },
+   "accessibility": {
+      "captions": {
+         "headless_caption_enabled": false
+      }
+   },
+   "account_tracker_service_last_update": "13406284200150249",
+   "aim_eligibility_service": {
+      "aim_eligibility_response": "CAEQABgAIAAwAA=="
+   },
+   "alternate_error_pages": {
+      "backup": false
+   },
+   "autocomplete": {
+      "retention_policy_last_version": 142
+   },
+   "autofill": {
+      "last_version_deduped": 142
+   },
+   "bookmark": {
+      "storage_computation_last_update": "13406284195314793"
+   },
+   "browser": {
+      "check_default_browser": false,
+      "window_placement": {
+         "bottom": 1157,
+         "left": -49,
+         "maximized": true,
+         "right": 896,
+         "top": 137,
+         "work_area_bottom": 1040,
+         "work_area_left": 0,
+         "work_area_right": 1920,
+         "work_area_top": 0
+      }
+   },
+   "commerce_daily_metrics_last_update_time": "13406284195314705",
+   "countryid_at_install": 22094,
+   "credentials_enable_service": false,
+   "devtools": {
+      "last_open_timestamp": "13406284974846",
+      "preferences": {
+         "closeable-tabs": "{\"security\":true,\"freestyler\":true,\"chrome-recorder\":true}",
+         "currentDockState": "\"right\"",
+         "elements.styles.sidebar.width": "{\"vertical\":{\"size\":0,\"showMode\":\"OnlyMain\"}}",
+         "inspector-view.split-view-state": "{\"vertical\":{\"size\":0}}",
+         "inspector.drawer-split-view-state": "{\"horizontal\":{\"size\":0,\"showMode\":\"OnlyMain\"}}",
+         "inspectorVersion": "40",
+         "releaseNoteVersionSeen": "83",
+         "styles-pane-sidebar-tab-order": "{\"styles\":10,\"computed\":20}"
+      },
+      "synced_preferences_sync_disabled": {
+         "adorner-settings": "[{\"adorner\":\"grid\",\"isEnabled\":true},{\"adorner\":\"subgrid\",\"isEnabled\":true},{\"adorner\":\"masonry\",\"isEnabled\":true},{\"adorner\":\"flex\",\"isEnabled\":true},{\"adorner\":\"ad\",\"isEnabled\":true},{\"adorner\":\"scroll-snap\",\"isEnabled\":true},{\"adorner\":\"starting-style\",\"isEnabled\":true},{\"adorner\":\"container\",\"isEnabled\":true},{\"adorner\":\"slot\",\"isEnabled\":true},{\"adorner\":\"top-layer\",\"isEnabled\":true},{\"adorner\":\"reveal\",\"isEnabled\":true},{\"adorner\":\"media\",\"isEnabled\":false},{\"adorner\":\"scroll\",\"isEnabled\":true},{\"adorner\":\"popover\",\"isEnabled\":true}]",
+         "syncedInspectorVersion": "40"
+      }
+   },
+   "distribution": {
+      "import_bookmarks": false,
+      "import_history": false,
+      "import_search_engine": false,
+      "make_chrome_default_for_user": false,
+      "skip_first_run_ui": true
+   },
+   "dns_prefetching": {
+      "enabled": false
+   },
+   "domain_diversity": {
+      "last_reporting_timestamp": "13406284198267267"
+   },
+   "enterprise_profile_guid": "7178ca1f-86a5-4dc9-a1cb-8c451bfd7a89",
+   "extensions": {
+      "alerts": {
+         "initialized": true
+      },
+      "chrome_url_overrides": {
+      },
+      "settings": {
+         "ahfgeienlihckogmohjhadlkjgocpleb": {
+            "account_extension_type": 0,
+            "active_permissions": {
+               "api": [ "management", "system.display", "system.storage", "webstorePrivate", "system.cpu", "system.memory", "system.network" ],
+               "explicit_host": [  ],
+               "manifest_permissions": [  ],
+               "scriptable_host": [  ]
+            },
+            "app_launcher_ordinal": "t",
+            "commands": {
+            },
+            "content_settings": [  ],
+            "creation_flags": 1,
+            "disable_reasons": [  ],
+            "events": [  ],
+            "first_install_time": "13406284194981928",
+            "from_webstore": false,
+            "incognito_content_settings": [  ],
+            "incognito_preferences": {
+            },
+            "last_update_time": "13406284194981928",
+            "location": 5,
+            "manifest": {
+               "app": {
+                  "launch": {
+                     "web_url": "https://chrome.google.com/webstore"
+                  },
+                  "urls": [ "https://chrome.google.com/webstore" ]
+               },
+               "description": "Discover great apps, games, extensions and themes for Google Chrome.",
+               "icons": {
+                  "128": "webstore_icon_128.png",
+                  "16": "webstore_icon_16.png"
+               },
+               "key": "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCtl3tO0osjuzRsf6xtD2SKxPlTfuoy7AWoObysitBPvH5fE1NaAA1/2JkPWkVDhdLBWLaIBPYeXbzlHp3y4Vv/4XG+aN5qFE3z+1RU/NqkzVYHtIpVScf3DjTYtKVL66mzVGijSoAIwbFCC3LpGdaoe6Q1rSRDp76wR6jjFzsYwQIDAQAB",
+               "name": "Web Store",
+               "permissions": [ "webstorePrivate", "management", "system.cpu", "system.display", "system.memory", "system.network", "system.storage" ],
+               "version": "0.2"
+            },
+            "needs_sync": true,
+            "page_ordinal": "n",
+            "path": "C:\\Program Files\\Google\\Chrome\\Application\\142.0.7444.60\\resources\\web_store",
+            "preferences": {
+            },
+            "regular_only_preferences": {
+            },
+            "was_installed_by_default": false,
+            "was_installed_by_oem": false
+         },
+         "mhjfbmdgcfjbbpaeojofohoefgiehjai": {
+            "account_extension_type": 0,
+            "active_permissions": {
+               "api": [ "contentSettings", "fileSystem", "fileSystem.write", "metricsPrivate", "tabs", "resourcesPrivate", "pdfViewerPrivate" ],
+               "explicit_host": [ "chrome://resources/*", "chrome://webui-test/*" ],
+               "manifest_permissions": [  ],
+               "scriptable_host": [  ]
+            },
+            "commands": {
+            },
+            "content_settings": [  ],
+            "creation_flags": 1,
+            "disable_reasons": [  ],
+            "events": [  ],
+            "first_install_time": "13406284194982578",
+            "from_webstore": false,
+            "incognito_content_settings": [  ],
+            "incognito_preferences": {
+            },
+            "last_update_time": "13406284194982578",
+            "location": 5,
+            "manifest": {
+               "content_security_policy": "script-src 'self' blob: filesystem: chrome://resources chrome://webui-test; object-src * blob: externalfile: file: filesystem: data:",
+               "description": "",
+               "incognito": "split",
+               "key": "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDN6hM0rsDYGbzQPQfOygqlRtQgKUXMfnSjhIBL7LnReAVBEd7ZmKtyN2qmSasMl4HZpMhVe2rPWVVwBDl6iyNE/Kok6E6v6V3vCLGsOpQAuuNVye/3QxzIldzG/jQAdWZiyXReRVapOhZtLjGfywCvlWq7Sl/e3sbc0vWybSDI2QIDAQAB",
+               "manifest_version": 2,
+               "mime_types": [ "application/pdf" ],
+               "mime_types_handler": "index.html",
+               "name": "Chrome PDF Viewer",
+               "offline_enabled": true,
+               "permissions": [ "chrome://resources/", "chrome://webui-test/", "contentSettings", "metricsPrivate", "pdfViewerPrivate", "resourcesPrivate", "tabs", {
+                  "fileSystem": [ "write" ]
+               } ],
+               "version": "1",
+               "web_accessible_resources": [ "pdf_embedder.css" ]
+            },
+            "path": "C:\\Program Files\\Google\\Chrome\\Application\\142.0.7444.60\\resources\\pdf",
+            "preferences": {
+            },
+            "regular_only_preferences": {
+            },
+            "was_installed_by_default": false,
+            "was_installed_by_oem": false
+         }
+      }
+   },
+   "gaia_cookie": {
+      "changed_time": 1761810599.602467,
+      "hash": "2jmj7l5rSw0yVb/vlWAYkK/YBwk=",
+      "last_list_accounts_binary_data": "",
+      "periodic_report_time_2": "13406284194948967"
+   },
+   "gcm": {
+      "product_category_for_subtypes": "com.chrome.windows",
+      "push_messaging_application_id_map": {
+         "wp:https://thanhnien.vn/#6038C7D1-2E0B-4632-8532-2824C86CA-V2": "https://thanhnien.vn/#6",
+         "wp:https://vnexpress.net/#F64DF9D9-4D8D-4DC9-9869-347B55CD3-V2": "https://vnexpress.net/#1"
+      },
+      "push_messaging_unsubscribed_entries_list": [  ]
+   },
+   "google": {
+      "services": {
+         "signin_scoped_device_id": "71a43bd3-d09e-4e10-a0ae-c3549e69b76d"
+      }
+   },
+   "history_clusters": {
+      "all_cache": {
+         "all_keywords": {
+         },
+         "all_timestamp": "13406284676610094"
+      }
+   },
+   "in_product_help": {
+      "recent_session_enabled_time": "13406284195009457",
+      "recent_session_start_times": [ "13406284195009457" ],
+      "session_last_active_time": "13406297610177175",
+      "session_number": 2,
+      "session_start_time": "13406284195009457"
+   },
+   "intl": {
+      "selected_languages": "en-US,en"
+   },
+   "invalidation": {
+      "per_sender_registered_for_invalidation": {
+         "1013309121859": {
+         },
+         "947318989803": {
+         }
+      }
+   },
+   "language_model_counters": {
+      "vi": 11
+   },
+   "media": {
+      "engagement": {
+         "schema_version": 5
+      }
+   },
+   "media_router": {
+      "receiver_id_hash_token": "xO90r6X9VCPUWw0Ew7gh7IdZLbz95cV/bj+JTa2wcYANqouENimkmcekiupfB1Xwl3KpYL0RTUilWeAv5Q7O/Q=="
+   },
+   "migrated_user_scripts_toggle": true,
+   "ntp": {
+      "num_personal_suggestions": 4
+   },
+   "optimization_guide": {
+      "hintsfetcher": {
+         "hosts_successfully_fetched": {
+         }
+      },
+      "previously_registered_optimization_types": {
+         "ABOUT_THIS_SITE": true,
+         "DIGITAL_CREDENTIALS_LOW_FRICTION": true,
+         "GLIC_ACTION_PAGE_BLOCK": true,
+         "HISTORY_CLUSTERS": true,
+         "LOADING_PREDICTOR": true,
+         "MERCHANT_TRUST_SIGNALS_V2": true,
+         "PRICE_TRACKING": true,
+         "SAVED_TAB_GROUP": true,
+         "V8_COMPILE_HINTS": true
+      }
+   },
+   "password_manager": {
+      "account_store_backup_password_cleaning_last_timestamp": "13406284254951831",
+      "account_store_migrated_to_os_crypt_async": true,
+      "profile_store_backup_password_cleaning_last_timestamp": "13406284254952212",
+      "profile_store_migrated_to_os_crypt_async": true
+   },
+   "persistent_notifications": {
+      "next_id": 10003
+   },
+   "pinned_tabs": [  ],
+   "privacy_sandbox": {
+      "first_party_sets_data_access_allowed_initialized": true,
+      "first_party_sets_enabled": false
+   },
+   "profile": {
+      "avatar_index": 26,
+      "background_password_check": {
+         "check_fri_weight": 9,
+         "check_interval": "2592000000000",
+         "check_mon_weight": 6,
+         "check_sat_weight": 6,
+         "check_sun_weight": 6,
+         "check_thu_weight": 9,
+         "check_tue_weight": 9,
+         "check_wed_weight": 9,
+         "next_check_time": "13407032798295559"
+      },
+      "content_settings": {
+         "exceptions": {
+            "3pcd_heuristics_grants": {
+            },
+            "3pcd_support": {
+            },
+            "abusive_notification_permissions": {
+            },
+            "access_to_get_all_screens_media_in_session": {
+            },
+            "anti_abuse": {
+            },
+            "app_banner": {
+            },
+            "ar": {
+            },
+            "are_suspicious_notifications_allowlisted_by_user": {
+            },
+            "auto_picture_in_picture": {
+            },
+            "auto_select_certificate": {
+            },
+            "automatic_downloads": {
+            },
+            "automatic_fullscreen": {
+            },
+            "autoplay": {
+            },
+            "background_sync": {
+            },
+            "bluetooth_chooser_data": {
+            },
+            "bluetooth_guard": {
+            },
+            "bluetooth_scanning": {
+            },
+            "camera_pan_tilt_zoom": {
+            },
+            "captured_surface_control": {
+            },
+            "client_hints": {
+            },
+            "clipboard": {
+            },
+            "controlled_frame": {
+            },
+            "cookie_controls_metadata": {
+               "https://[*.]thanhnien.vn,*": {
+                  "last_modified": "13406295807202264",
+                  "setting": {
+                  }
+               },
+               "https://[*.]tuoitre.vn,*": {
+                  "last_modified": "13406295861662925",
+                  "setting": {
+                  }
+               },
+               "https://[*.]vnexpress.net,*": {
+                  "last_modified": "13406295745196359",
+                  "setting": {
+                  }
+               }
+            },
+            "cookies": {
+            },
+            "direct_sockets": {
+            },
+            "direct_sockets_private_network_access": {
+            },
+            "display_media_system_audio": {
+            },
+            "disruptive_notification_permissions": {
+            },
+            "durable_storage": {
+            },
+            "fedcm_idp_registration": {
+            },
+            "fedcm_idp_signin": {
+               "https://accounts.google.com:443,*": {
+                  "last_modified": "13406284199602827",
+                  "setting": {
+                     "chosen-objects": [ {
+                        "idp-origin": "https://accounts.google.com",
+                        "idp-signin-status": false
+                     } ]
+                  }
+               }
+            },
+            "fedcm_share": {
+            },
+            "file_system_access_chooser_data": {
+            },
+            "file_system_access_extended_permission": {
+            },
+            "file_system_access_restore_permission": {
+            },
+            "file_system_last_picked_directory": {
+            },
+            "file_system_read_guard": {
+            },
+            "file_system_write_guard": {
+            },
+            "formfill_metadata": {
+            },
+            "geolocation": {
+            },
+            "geolocation_with_options": {
+            },
+            "hand_tracking": {
+            },
+            "hid_chooser_data": {
+            },
+            "hid_guard": {
+            },
+            "http_allowed": {
+            },
+            "https_enforced": {
+            },
+            "idle_detection": {
+            },
+            "images": {
+            },
+            "important_site_info": {
+            },
+            "initialized_translations": {
+            },
+            "intent_picker_auto_display": {
+            },
+            "javascript": {
+            },
+            "javascript_jit": {
+            },
+            "javascript_optimizer": {
+            },
+            "keyboard_lock": {
+            },
+            "legacy_cookie_access": {
+            },
+            "legacy_cookie_scope": {
+            },
+            "local_fonts": {
+            },
+            "local_network_access": {
+            },
+            "media_engagement": {
+               "https://thanhnien.vn:443,*": {
+                  "expiration": "13414071861663697",
+                  "last_modified": "13406295861663701",
+                  "lifetime": "7776000000000",
+                  "setting": {
+                     "hasHighScore": false,
+                     "lastMediaPlaybackTime": 0.0,
+                     "mediaPlaybacks": 0,
+                     "visits": 12
+                  }
+               },
+               "https://tuoitre.vn:443,*": {
+                  "expiration": "13414071917067929",
+                  "last_modified": "13406295917067933",
+                  "lifetime": "7776000000000",
+                  "setting": {
+                     "hasHighScore": false,
+                     "lastMediaPlaybackTime": 0.0,
+                     "mediaPlaybacks": 0,
+                     "visits": 3
+                  }
+               },
+               "https://vnexpress.net:443,*": {
+                  "expiration": "13414071807202668",
+                  "last_modified": "13406295807202670",
+                  "lifetime": "7776000000000",
+                  "setting": {
+                     "hasHighScore": false,
+                     "lastMediaPlaybackTime": 0.0,
+                     "mediaPlaybacks": 0,
+                     "visits": 14
+                  }
+               }
+            },
+            "media_stream_camera": {
+            },
+            "media_stream_mic": {
+            },
+            "midi_sysex": {
+            },
+            "mixed_script": {
+            },
+            "nfc_devices": {
+            },
+            "notification_interactions": {
+               "https://vnexpress.net:443,*": {
+                  "last_modified": "13406297402081911",
+                  "setting": {
+                     "1761782400": {
+                        "display_count": 3
+                     }
+                  }
+               }
+            },
+            "notification_permission_review": {
+            },
+            "notifications": {
+               "https://thanhnien.vn:443,*": {
+                  "last_modified": "13406286152849493",
+                  "setting": 1
+               },
+               "https://vnexpress.net:443,*": {
+                  "last_modified": "13406284683972733",
+                  "setting": 1
+               }
+            },
+            "ondevice_languages_downloaded": {
+            },
+            "password_protection": {
+            },
+            "payment_handler": {
+            },
+            "permission_actions_history": {
+            },
+            "permission_autoblocking_data": {
+               "https://thanhnien.vn:443,*": {
+                  "last_modified": "13406285872105571",
+                  "setting": {
+                     "Notifications": {
+                        "ignore_count": 2
+                     }
+                  }
+               },
+               "https://tuoitre.vn:443,*": {
+                  "last_modified": "13406295917068441",
+                  "setting": {
+                     "Notifications": {
+                        "ignore_count": 3
+                     }
+                  }
+               }
+            },
+            "permission_autorevocation_data": {
+            },
+            "pointer_lock": {
+            },
+            "popups": {
+            },
+            "protected_media_identifier": {
+            },
+            "protocol_handler": {
+            },
+            "reduced_accept_language": {
+            },
+            "safe_browsing_url_check_data": {
+            },
+            "sensors": {
+            },
+            "serial_chooser_data": {
+            },
+            "serial_guard": {
+            },
+            "site_engagement": {
+               "chrome://newtab/,*": {
+                  "last_modified": "13406297616278056",
+                  "setting": {
+                     "lastEngagementTime": 1.340629761627804e+16,
+                     "lastShortcutLaunchTime": 0.0,
+                     "pointsAddedToday": 15.0,
+                     "rawScore": 15.0
+                  }
+               },
+               "chrome://settings/,*": {
+                  "last_modified": "13406284669839666",
+                  "setting": {
+                     "lastEngagementTime": 1.340628466983966e+16,
+                     "lastShortcutLaunchTime": 0.0,
+                     "pointsAddedToday": 3.0,
+                     "rawScore": 3.0
+                  }
+               },
+               "https://thanhnien.vn:443,*": {
+                  "last_modified": "13406295807203586",
+                  "setting": {
+                     "lastEngagementTime": 1.3406295807203576e+16,
+                     "lastShortcutLaunchTime": 0.0,
+                     "pointsAddedToday": 15.0,
+                     "rawScore": 15.0
+                  }
+               },
+               "https://tuoitre.vn:443,*": {
+                  "last_modified": "13406295913031978",
+                  "setting": {
+                     "lastEngagementTime": 1.3406295913031958e+16,
+                     "lastShortcutLaunchTime": 0.0,
+                     "pointsAddedToday": 6.599999999999997,
+                     "rawScore": 6.599999999999997
+                  }
+               },
+               "https://vnexpress.net:443,*": {
+                  "last_modified": "13406295788887405",
+                  "setting": {
+                     "lastEngagementTime": 1.340629578888738e+16,
+                     "lastShortcutLaunchTime": 0.0,
+                     "pointsAddedToday": 15.0,
+                     "rawScore": 15.0
+                  }
+               }
+            },
+            "sound": {
+            },
+            "speaker_selection": {
+            },
+            "ssl_cert_decisions": {
+            },
+            "storage_access": {
+            },
+            "storage_access_header_origin_trial": {
+            },
+            "subresource_filter": {
+            },
+            "subresource_filter_data": {
+            },
+            "suspicious_notification_ids": {
+            },
+            "suspicious_notification_show_original": {
+            },
+            "third_party_storage_partitioning": {
+            },
+            "top_level_3pcd_origin_trial": {
+            },
+            "top_level_3pcd_support": {
+            },
+            "top_level_storage_access": {
+            },
+            "tracking_protection": {
+            },
+            "unused_site_permissions": {
+            },
+            "usb_chooser_data": {
+            },
+            "usb_guard": {
+            },
+            "vr": {
+            },
+            "web_app_installation": {
+            },
+            "webid_api": {
+            },
+            "webid_auto_reauthn": {
+            },
+            "window_placement": {
+            }
+         },
+         "pattern_pairs": {
+            "https://*,*": {
+               "media-stream": {
+                  "audio": "Default",
+                  "video": "Default"
+               }
+            }
+         },
+         "permission_actions": {
+            "notifications": [ {
+               "action": 0,
+               "prompt_disposition": 1,
+               "time": "13406284683973993"
+            }, {
+               "action": 3,
+               "prompt_disposition": 1,
+               "time": "13406285064149483"
+            }, {
+               "action": 3,
+               "prompt_disposition": 1,
+               "time": "13406285872105550"
+            }, {
+               "action": 0,
+               "prompt_disposition": 1,
+               "time": "13406286152850704"
+            }, {
+               "action": 3,
+               "prompt_disposition": 1,
+               "time": "13406291655402013"
+            }, {
+               "action": 3,
+               "prompt_disposition": 1,
+               "time": "13406293131248539"
+            }, {
+               "action": 3,
+               "prompt_disposition": 1,
+               "time": "13406295917068417"
+            } ]
+         },
+         "pref_version": 1
+      },
+      "creation_time": "13406284194066725",
+      "default_content_setting_values": {
+         "geolocation": 1
+      },
+      "default_content_settings": {
+         "geolocation": 1,
+         "mouselock": 1,
+         "notifications": 1,
+         "popups": 1,
+         "ppapi-broker": 1
+      },
+      "exit_type": "Normal",
+      "family_member_role": "not_in_family",
+      "last_engagement_time": "13406297616278040",
+      "last_time_obsolete_http_credentials_removed": 1761810654.951903,
+      "last_time_password_store_metrics_reported": 1761810624.964111,
+      "managed": {
+         "locally_parent_approved_extensions": {
+         },
+         "locally_parent_approved_extensions_migration_state": 1
+      },
+      "managed_user_id": "",
+      "name": "Your Chrome",
+      "password_hash_data_list": [  ],
+      "password_manager_enabled": false,
+      "safety_hub_menu_notifications": {
+         "extensions": {
+            "isCurrentlyActive": false,
+            "result": {
+               "timestamp": "13406284665385116",
+               "triggeringExtensions": [  ]
+            }
+         },
+         "notification-permissions": {
+            "isCurrentlyActive": false,
+            "result": {
+               "notificationPermissions": [  ],
+               "timestamp": "13406284663463934"
+            }
+         },
+         "passwords": {
+            "isCurrentlyActive": false,
+            "result": {
+               "passwordCheckOrigins": [  ],
+               "timestamp": "13406284663760220"
+            }
+         },
+         "safe-browsing": {
+            "isCurrentlyActive": false,
+            "onlyShowAfterTime": "13406371065384967",
+            "result": {
+               "safeBrowsingStatus": 4,
+               "timestamp": "13406284665385062"
+            }
+         },
+         "unused-site-permissions": {
+            "isCurrentlyActive": false,
+            "result": {
+               "permissions": [  ],
+               "timestamp": "13406284663463964"
+            }
+         }
+      },
+      "were_old_google_logins_removed": true
+   },
+   "protection": {
+      "macs": {
+         "account_values": {
+            "browser": {
+               "show_home_button": "F13CC3AEE43AC599CFA8C6EFD5E38E1DCF348450A303BECD671D198B4FC577F7"
+            },
+            "extensions": {
+               "ui": {
+                  "developer_mode": "C8CB6C8EBB7D076D73C0BA783EF026E07D38A3481A012EA471E4F05511EAB626"
+               }
+            },
+            "homepage": "12835469F77E4A768B98B171A25B9189DF8378A1B5662A3BCEEEF5590D4358FB",
+            "homepage_is_newtabpage": "94855F12148CB8602DEC96FDDB0233603B6C29DEEE5481B3E084EDB25CE35DB4",
+            "session": {
+               "restore_on_startup": "B049FC9B38DCC7675FCAF6359CBBAFBFE8D8EE70349A9C1DC71FFFD44F18B2A3",
+               "startup_urls": "031DFAA19E590F8E164E01E5B4AF000FF505AB61A05EB0AEC4D67E6DA2ECE3F4"
+            }
+         },
+         "browser": {
+            "show_home_button": "1054C1615A2A97A72EE7A31E647185505718961F18422DDA6D1DCCC2CDD13DEF"
+         },
+         "default_search_provider_data": {
+            "template_url_data": "0298D1136AB2F99FE2A9452D12B15FFB021E1FA825DA9818945AABA1E3720AE7"
+         },
+         "enterprise_signin": {
+            "policy_recovery_token": "AE6D7914B31F8BEDE9C0D05323B000BA8678717D9535F5711570B972D80066EC"
+         },
+         "extensions": {
+            "install": {
+               "initiallist": "69865E99BE18DB5298CA73ED92B6C4EF61AF5F5E7B66E1AEB443DCFEE74D9AA4",
+               "initialprovidername": "DDA819EF774E3C70E313E57A0D46F22EC0BB0C374F05027DA219A119FBFC4C44"
+            },
+            "settings": {
+               "ahfgeienlihckogmohjhadlkjgocpleb": "D43A54CFDDAF423F7F5B2232A71018E1360381F633F8BCCDEA0836517D2CD374",
+               "mhjfbmdgcfjbbpaeojofohoefgiehjai": "384FE82FFE5FBD84073332E60ED7F501076FA58CD710F5FDC2D571556717A247"
+            },
+            "ui": {
+               "developer_mode": "9E24BAF80D414B8910EE16006CF687DBD42D1EE74014965436F074B640E0FAC4"
+            }
+         },
+         "google": {
+            "services": {
+               "account_id": "ED2E3D5721DC938333BBFD459197E25979F19060B370B28CB256F0C16C8F1690",
+               "last_signed_in_username": "DC14CEBCC6BAB105F6B90ABCCCBA7855CF28D2ED553AC7A360D8B164AFA1D421",
+               "last_username": "7ECEBB3FA4FC1F52CD7F406BCDBEB6AFDF04D8FB5F2A1CB934FACF0309239AFA"
+            }
+         },
+         "homepage": "B24FF2919641372E703FA37F1AAD0C454312BE6B708AAB7510732287A12A243D",
+         "homepage_is_newtabpage": "EED9376EB248C7E8BC5218E21A1BE4ECA0AD8CCA57AA981D86C4E30D96B14642",
+         "media": {
+            "cdm": {
+               "origin_data": "2CDD0D8B91352C8FD356DFD906B8F77D847E12D1E1A616C198AD7B1C52B50A5D"
+            },
+            "storage_id_salt": "6983FCE341533C7F995A980512703ADF5E302593BC27359BF1B6FCF50076EB72"
+         },
+         "pinned_tabs": "AE36D4E7CCD8D528238FA932E37757E19F9C880B05D7DE85D45F9437D3DE4D7D",
+         "prefs": {
+            "preference_reset_time": "3F7E7FB3C8AE214B9347BD375C95DEC23BF37753FD135FFCC4FD14AEB4486412"
+         },
+         "safebrowsing": {
+            "incidents_sent": "17419DD47C1DD083B33D0578549F87525E26991CD19C8F43DA39E8485DE2497E"
+         },
+         "schedule_to_flush_to_disk": "14F6D28A2657E280D3330C96DAB45FD6FFA6A3370798545CB8E8E16D4AF5A8B6",
+         "search_provider_overrides": "07AA974F920D75314C752A0437715B86444D9B36DD6608194D3BCF201A0BE5C3",
+         "session": {
+            "restore_on_startup": "DBD2573D0506C6DE295773066840A11BA56C090573E1B71B9F2C5D6F237F121A",
+            "startup_urls": "9619CD2CF035D8BC7FA3097C07698C4E7FB191E7A3A0FBC5BC6E7A0696272FDF"
+         }
+      }
+   },
+   "safebrowsing": {
+      "enabled": false,
+      "event_timestamps": {
+      },
+      "metrics_last_log_time": "13406284195",
+      "scout_reporting_enabled_when_deprecated": false
+   },
+   "safety_hub": {
+      "unused_site_permissions_revocation": {
+         "migration_completed": true
+      }
+   },
+   "saved_tab_groups": {
+      "did_enable_shared_tab_groups_in_last_session": false,
+      "specifics_to_data_migration": true
+   },
+   "search": {
+      "suggest_enabled": false
+   },
+   "segmentation_platform": {
+      "client_result_prefs": "ClIKDXNob3BwaW5nX3VzZXISQQo2DQAAAAAQm67HvZye6BcaJAocChoNAAAAPxIMU2hvcHBpbmdVc2VyGgVPdGhlchIEEAIYBCADENGux72cnugX",
+      "device_switcher_util": {
+         "result": {
+            "labels": [ "NotSynced" ]
+         }
+      },
+      "last_db_compaction_time": "13406169599000000",
+      "uma_in_sql_start_time": "13406284194956110"
+   },
+   "sessions": {
+      "event_log": [ {
+         "crashed": false,
+         "time": "13406290827283731",
+         "type": 0
+      }, {
+         "crashed": true,
+         "time": "13406291178554889",
+         "type": 0
+      }, {
+         "did_schedule_command": true,
+         "first_session_service": true,
+         "tab_count": 1,
+         "time": "13406291438853131",
+         "type": 2,
+         "window_count": 1
+      }, {
+         "crashed": false,
+         "time": "13406291533719884",
+         "type": 0
+      }, {
+         "did_schedule_command": true,
+         "first_session_service": true,
+         "tab_count": 1,
+         "time": "13406291655337170",
+         "type": 2,
+         "window_count": 1
+      }, {
+         "crashed": false,
+         "time": "13406292949342416",
+         "type": 0
+      }, {
+         "did_schedule_command": true,
+         "first_session_service": true,
+         "tab_count": 1,
+         "time": "13406293131235814",
+         "type": 2,
+         "window_count": 1
+      }, {
+         "crashed": false,
+         "time": "13406295744232862",
+         "type": 0
+      }, {
+         "did_schedule_command": true,
+         "first_session_service": true,
+         "tab_count": 1,
+         "time": "13406295917012546",
+         "type": 2,
+         "window_count": 1
+      }, {
+         "crashed": false,
+         "time": "13406296678002628",
+         "type": 0
+      }, {
+         "did_schedule_command": true,
+         "first_session_service": true,
+         "tab_count": 1,
+         "time": "13406296695810572",
+         "type": 2,
+         "window_count": 1
+      }, {
+         "crashed": false,
+         "time": "13406296775770000",
+         "type": 0
+      }, {
+         "did_schedule_command": true,
+         "first_session_service": true,
+         "tab_count": 1,
+         "time": "13406296798698412",
+         "type": 2,
+         "window_count": 1
+      }, {
+         "crashed": false,
+         "time": "13406296876430631",
+         "type": 0
+      }, {
+         "did_schedule_command": true,
+         "first_session_service": true,
+         "tab_count": 1,
+         "time": "13406296912013711",
+         "type": 2,
+         "window_count": 1
+      }, {
+         "crashed": false,
+         "time": "13406297397112798",
+         "type": 0
+      }, {
+         "did_schedule_command": true,
+         "first_session_service": true,
+         "tab_count": 1,
+         "time": "13406297420848927",
+         "type": 2,
+         "window_count": 1
+      }, {
+         "crashed": false,
+         "time": "13406297610114643",
+         "type": 0
+      }, {
+         "did_schedule_command": true,
+         "first_session_service": true,
+         "tab_count": 1,
+         "time": "13406297702565514",
+         "type": 2,
+         "window_count": 1
+      } ],
+      "session_data_status": 5
+   },
+   "settings": {
+      "force_google_safesearch": false
+   },
+   "signin": {
+      "accounts_metadata_dict": {
+      },
+      "allowed": true,
+      "cookie_clear_on_exit_migration_notice_complete": true
+   },
+   "site_search_settings": {
+      "overridden_keywords": [  ]
+   },
+   "spellcheck": {
+      "dictionaries": [ "en-US" ],
+      "dictionary": ""
+   },
+   "syncing_theme_prefs_migrated_to_non_syncing": true,
+   "toolbar": {
+      "pinned_cast_migration_complete": true,
+      "pinned_chrome_labs_migration_complete": true
+   },
+   "total_passwords_available_for_account": 0,
+   "total_passwords_available_for_profile": 0,
+   "translate": {
+      "enabled": false
+   },
+   "translate_site_blacklist": [  ],
+   "translate_site_blocklist_with_time": {
+   },
+   "web_apps": {
+      "did_migrate_default_chrome_apps": [ "MigrateDefaultChromeAppToWebAppsGSuite", "MigrateDefaultChromeAppToWebAppsNonGSuite" ],
+      "last_preinstall_synchronize_version": "142"
+   }
+}
+[1761824290.233][INFO]: Populating Local State file: {
+   "autofill": {
+      "ablation_seed": "3iswa56wPfI="
+   },
+   "background_mode": {
+      "enabled": false
+   },
+   "breadcrumbs": {
+      "enabled": false,
+      "enabled_time": "13406284194878548"
+   },
+   "browser": {
+      "shortcut_migration_version": "142.0.7444.60"
+   },
+   "hardware_acceleration_mode_previous": true,
+   "legacy": {
+      "profile": {
+         "name": {
+            "migrated": true
+         }
+      }
+   },
+   "local": {
+      "password_hash_data_list": [  ]
+   },
+   "management": {
+      "platform": {
+         "azure_active_directory": 0,
+         "enterprise_mdm_win": 0
+      }
+   },
+   "network_time": {
+      "network_time_mapping": {
+         "local": 1.761810598196999e+12,
+         "network": 1.761810598166e+12,
+         "ticks": 106034668705.0,
+         "uncertainty": 10176679.0
+      }
+   },
+   "optimization_guide": {
+      "model_cache_key_mapping": {
+         "13E6DC4029A1E4B4C1": "4F40902F3B6AE19A",
+         "15E6DC4029A1E4B4C1": "4F40902F3B6AE19A",
+         "20E6DC4029A1E4B4C1": "4F40902F3B6AE19A",
+         "24E6DC4029A1E4B4C1": "E6DC4029A1E4B4C1",
+         "25E6DC4029A1E4B4C1": "4F40902F3B6AE19A",
+         "26E6DC4029A1E4B4C1": "4F40902F3B6AE19A",
+         "2E6DC4029A1E4B4C1": "4F40902F3B6AE19A",
+         "45E6DC4029A1E4B4C1": "4F40902F3B6AE19A",
+         "9E6DC4029A1E4B4C1": "4F40902F3B6AE19A"
+      },
+      "model_execution": {
+         "last_usage_by_feature": {
+         }
+      },
+      "model_store_metadata": {
+         "13": {
+            "4F40902F3B6AE19A": {
+               "et": "13408889628568722",
+               "kbvd": false,
+               "mbd": "13\\E6DC4029A1E4B4C1\\35C8A02B444BDF98",
+               "v": "1673999601"
+            }
+         },
+         "15": {
+            "4F40902F3B6AE19A": {
+               "et": "13408876211247852",
+               "kbvd": true,
+               "mbd": "15\\E6DC4029A1E4B4C1\\9E281E7DE0ACAA3F",
+               "v": "5"
+            }
+         },
+         "2": {
+            "4F40902F3B6AE19A": {
+               "et": "13408876210569504",
+               "kbvd": true,
+               "mbd": "2\\E6DC4029A1E4B4C1\\BE311257FAF80AEA",
+               "v": "1679317318"
+            }
+         },
+         "20": {
+            "4F40902F3B6AE19A": {
+               "et": "13408889628571843",
+               "kbvd": false,
+               "mbd": "20\\E6DC4029A1E4B4C1\\58DD6BF9567AE321",
+               "v": "1745311339"
+            }
+         },
+         "24": {
+            "E6DC4029A1E4B4C1": {
+               "et": "13408889628572905",
+               "kbvd": false,
+               "mbd": "24\\E6DC4029A1E4B4C1\\7B58BD27E265E28D",
+               "v": "1728324084"
+            }
+         },
+         "25": {
+            "4F40902F3B6AE19A": {
+               "et": "13408889628573719",
+               "kbvd": false,
+               "mbd": "25\\E6DC4029A1E4B4C1\\F333D09F92D5F1B9",
+               "v": "1760454161"
+            }
+         },
+         "26": {
+            "4F40902F3B6AE19A": {
+               "et": "13418393628575988",
+               "kbvd": false,
+               "mbd": "26\\E6DC4029A1E4B4C1\\B0D3A713BC71E10C",
+               "v": "1696268326"
+            }
+         },
+         "45": {
+            "4F40902F3B6AE19A": {
+               "et": "13408889628577558",
+               "kbvd": false,
+               "mbd": "45\\E6DC4029A1E4B4C1\\82DB547888FD50A0",
+               "v": "240731042075"
+            }
+         },
+         "9": {
+            "4F40902F3B6AE19A": {
+               "et": "13408889628567882",
+               "kbvd": false,
+               "mbd": "9\\E6DC4029A1E4B4C1\\DEA511051A35C47B",
+               "v": "1745312779"
+            }
+         }
+      },
+      "on_device": {
+         "last_version": "142.0.7444.60",
+         "model_crash_count": 0,
+         "performance_class": 1,
+         "performance_class_version": "142.0.7444.60"
+      },
+      "predictionmodelfetcher": {
+         "last_fetch_attempt": "13406297620121148",
+         "last_fetch_success": "13406297620287115"
+      }
+   },
+   "os_crypt": {
+      "audit_enabled": true,
+      "encrypted_key": "RFBBUEkBAAAA0Iyd3wEV0RGMegDAT8KX6wEAAABxmm02C6VsQJS4CtuMD8AcEAAAABwAAABHAG8AbwBnAGwAZQAgAEMAaAByAG8AbQBlAAAAA2YAAMAAAAAQAAAArDE+YSmwes1gtY06FFVAPgAAAAAEgAAAoAAAABAAAAByKfbORe6m/S6+Bc2o+emXKAAAANzFL2MvfD6q4/K531H3ZNUumaPQXKAoVZg4KEZ28Fmm9HfAjwXhP0sUAAAATLt48lShnyMbN5//le98+FTa7gU="
+   },
+   "os_update_handler_enabled": true,
+   "password_manager": {
+      "is_biometric_avaliable": false
+   },
+   "performance_intervention": {
+      "last_daily_sample": "13406284195311371"
+   },
+   "policy": {
+      "last_statistics_update": "13406284194876415"
+   },
+   "privacy_budget": {
+      "meta_experiment_activation_salt": 0.6388570462944444
+   },
+   "profile": {
+      "info_cache": {
+         "Default": {
+            "active_time": 1761822144.465714,
+            "avatar_icon": "chrome://theme/IDR_PROFILE_AVATAR_26",
+            "background_apps": false,
+            "default_avatar_fill_color": -2890755,
+            "default_avatar_stroke_color": -16166200,
+            "enterprise_label": "",
+            "force_signin_profile_locked": false,
+            "gaia_given_name": "",
+            "gaia_id": "",
+            "gaia_name": "",
+            "hosted_domain": "",
+            "is_consented_primary_account": false,
+            "is_ephemeral": false,
+            "is_glic_eligible": false,
+            "is_managed": 0,
+            "is_using_default_avatar": true,
+            "is_using_default_name": true,
+            "managed_user_id": "",
+            "metrics_bucket_index": 1,
+            "name": "Your Chrome",
+            "profile_color_seed": -16033840,
+            "profile_highlight_color": -2890755,
+            "signin.with_credential_provider": false,
+            "user_name": ""
+         }
+      },
+      "last_active_profiles": [ "Default" ],
+      "metrics": {
+         "next_bucket_index": 2
+      },
+      "profile_counts_reported": "13406284194896279",
+      "profiles_order": [ "Default" ]
+   },
+   "profile_network_context_service": {
+      "http_cache_finch_experiment_groups": "None None None None"
+   },
+   "session_id_generator_last_value": "109488048",
+   "signin": {
+      "active_accounts_last_emitted": "13406284194681079"
+   },
+   "ssl": {
+      "rev_checking": {
+         "enabled": false
+      }
+   },
+   "subresource_filter": {
+      "ruleset_version": {
+         "checksum": 0,
+         "content": "",
+         "format": 0
+      }
+   },
+   "tab_stats": {
+      "discards_external": 0,
+      "discards_frozen": 0,
+      "discards_proactive": 0,
+      "discards_suggested": 0,
+      "discards_urgent": 0,
+      "last_daily_sample": "13406284194813356",
+      "max_tabs_per_window": 1,
+      "reloads_external": 0,
+      "reloads_frozen": 0,
+      "reloads_proactive": 0,
+      "reloads_suggested": 0,
+      "reloads_urgent": 0,
+      "total_tab_count_max": 2,
+      "window_count_max": 2
+   },
+   "toast": {
+      "non_milestone_update_toast_version": "142.0.7444.60"
+   },
+   "ukm": {
+      "persisted_logs": [  ]
+   },
+   "uninstall_metrics": {
+      "installation_date2": "1761810594"
+   },
+   "user_experience_metrics": {
+      "limited_entropy_randomization_source": "14412BF8D8C3476BA83D4117FE2FD086",
+      "low_entropy_source3": 1111,
+      "machine_id": 9688791,
+      "pseudo_low_entropy_source": 6586,
+      "session_id": 21,
+      "stability": {
+         "browser_last_live_timestamp": "13406297702588495",
+         "exited_cleanly": true,
+         "stats_buildtime": "1761597872",
+         "stats_version": "142.0.7444.60-64",
+         "system_crash_count": 0
+      }
+   },
+   "variations_crash_streak": 4,
+   "variations_google_groups": {
+      "Default": [  ]
+   },
+   "was": {
+      "restarted": false
+   }
+}
+[1761824290.236][INFO]: ChromeDriver supports communication with Chrome via pipes. This is more reliable and more secure.
+[1761824290.236][INFO]: Use the --remote-debugging-pipe Chrome switch instead of the default --remote-debugging-port to enable this communication mode.
+[1761824290.239][INFO]: Launching chrome: "C:\Program Files\Google\Chrome\Application\chrome.exe" --allow-pre-commit-input --disable-background-networking --disable-backgrounding-occluded-windows --disable-blink-features=AutomationControlled --disable-client-side-phishing-detection --disable-component-update --disable-default-apps --disable-domain-reliability --disable-extensions --disable-features=IgnoreDuplicateNavs,Prewarm,IsolateOrigins,site-per-process --disable-hang-monitor --disable-infobars --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-sync --enable-logging --ignore-certificate-errors --log-level=0 --no-default-browser-check --no-first-run --no-service-autorun --password-store=basic --remote-allow-origins=* --remote-debugging-port=0 --start-maximized --test-type=webdriver --use-mock-keychain --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36" --user-data-dir="D:\PROJECT\SBA\CONSUM_SCREEN_PAGE_BY_SE_C\ConsummerScreenPageBot\\chrome-profile"
+[1761824290.956][DEBUG]: DevTools HTTP Request: http://localhost:8889/json/version
+[1761824291.300][DEBUG]: DevTools HTTP Response: {
+   "Browser": "Chrome/142.0.7444.60",
+   "Protocol-Version": "1.3",
+   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+   "V8-Version": "14.2.231.14",
+   "WebKit-Version": "537.36 (@e7848b4d5b3843432464a9b8237fe58e87f6c357)",
+   "webSocketDebuggerUrl": "ws://localhost:8889/devtools/browser/24420e90-9d22-41f8-9cc4-ec032473a5f5"
+}
+
+[1761824291.300][DEBUG]: DevTools HTTP Request: http://localhost:8889/json/list
+[1761824291.304][DEBUG]: DevTools HTTP Response: [ {
+   "description": "",
+   "devtoolsFrontendUrl": "https://chrome-devtools-frontend.appspot.com/serve_rev/@e7848b4d5b3843432464a9b8237fe58e87f6c357/inspector.html?ws=localhost:8889/devtools/page/0B14127C70BEE3379502E174B8D53538",
+   "id": "0B14127C70BEE3379502E174B8D53538",
+   "title": "New Tab",
+   "type": "page",
+   "url": "chrome://newtab/",
+   "webSocketDebuggerUrl": "ws://localhost:8889/devtools/page/0B14127C70BEE3379502E174B8D53538"
+} ]
+
+[1761824291.327][INFO]: resolved localhost to ["::1","127.0.0.1"]
+[1761824291.338][DEBUG]: DevTools WebSocket Command: Security.setIgnoreCertificateErrors (id=1) (session_id=) browser {
+   "ignore": true
+}
+[1761824291.339][DEBUG]: DevTools WebSocket Response: Security.setIgnoreCertificateErrors (id=1) (session_id=) browser {
+}
+[1761824291.339][DEBUG]: DevTools WebSocket Command: Target.getTargets (id=2) (session_id=) browser {
+   "filter": [ {
+      "exclude": true,
+      "type": "browser"
+   }, {
+      "exclude": true,
+      "type": "page"
+   }, {
+      "exclude": false
+   } ]
+}
+[1761824291.340][DEBUG]: DevTools WebSocket Response: Target.getTargets (id=2) (session_id=) browser {
+   "targetInfos": [ {
+      "attached": false,
+      "browserContextId": "76FA3AB4B5D12CCCAB475E8642C15A27",
+      "canAccessOpener": false,
+      "targetId": "EF37AF034CD39677011C0F8DFF038025",
+      "title": "New Tab",
+      "type": "tab",
+      "url": "chrome://newtab/"
+   } ]
+}
+[1761824291.340][DEBUG]: DevTools WebSocket Command: Target.attachToTarget (id=3) (session_id=) browser {
+   "flatten": true,
+   "targetId": "EF37AF034CD39677011C0F8DFF038025"
+}
+[1761824291.341][DEBUG]: DevTools WebSocket Event: Target.attachedToTarget (session_id=) browser {
+   "sessionId": "FB0C48841B492A6EA538D73D05193A03",
+   "targetInfo": {
+      "attached": true,
+      "browserContextId": "76FA3AB4B5D12CCCAB475E8642C15A27",
+      "canAccessOpener": false,
+      "targetId": "EF37AF034CD39677011C0F8DFF038025",
+      "title": "New Tab",
+      "type": "tab",
+      "url": "chrome://newtab/"
+   },
+   "waitingForDebugger": false
+}
+[1761824291.341][DEBUG]: DevTools WebSocket Response: Target.attachToTarget (id=3) (session_id=) browser {
+   "sessionId": "FB0C48841B492A6EA538D73D05193A03"
+}
+[1761824291.341][DEBUG]: DevTools WebSocket Command: Target.setAutoAttach (id=4) (session_id=FB0C48841B492A6EA538D73D05193A03) EF37AF034CD39677011C0F8DFF038025 {
+   "autoAttach": true,
+   "flatten": true,
+   "waitForDebuggerOnStart": false
+}
+[1761824291.342][DEBUG]: DevTools WebSocket Event: Target.attachedToTarget (session_id=FB0C48841B492A6EA538D73D05193A03) EF37AF034CD39677011C0F8DFF038025 {
+   "sessionId": "44C3F9AAE69DF92B65CBDC5744FB873E",
+   "targetInfo": {
+      "attached": true,
+      "browserContextId": "76FA3AB4B5D12CCCAB475E8642C15A27",
+      "canAccessOpener": false,
+      "targetId": "0B14127C70BEE3379502E174B8D53538",
+      "title": "New Tab",
+      "type": "page",
+      "url": "chrome://newtab/"
+   },
+   "waitingForDebugger": false
+}
+[1761824291.342][DEBUG]: DevTools WebSocket Command: Page.enable (id=5) (session_id=44C3F9AAE69DF92B65CBDC5744FB873E) 0B14127C70BEE3379502E174B8D53538 {
+}
+[1761824291.342][DEBUG]: DevTools WebSocket Command: Page.addScriptToEvaluateOnNewDocument (id=6) (session_id=44C3F9AAE69DF92B65CBDC5744FB873E) 0B14127C70BEE3379502E174B8D53538 {
+   "source": "(function () {window.cdc_adoQpoasnfa76pfcZLmcfl_Array = window.Array;window.cdc_adoQpoasnfa76pfcZLmcfl_Object = window.Object;window.cdc_adoQpoasnfa76pfcZLmcfl_Promise = window.Promise;window.cdc_a..."
+}
+[1761824291.342][DEBUG]: DevTools WebSocket Command: Runtime.evaluate (id=7) (session_id=44C3F9AAE69DF92B65CBDC5744FB873E) 0B14127C70BEE3379502E174B8D53538 {
+   "expression": "(function () {window.cdc_adoQpoasnfa76pfcZLmcfl_Array = window.Array;window.cdc_adoQpoasnfa76pfcZLmcfl_Object = window.Object;window.cdc_adoQpoasnfa76pfcZLmcfl_Promise = window.Promise;window.cdc_a..."
+}
+[1761824291.342][DEBUG]: DevTools WebSocket Command: Log.enable (id=8) (session_id=44C3F9AAE69DF92B65CBDC5744FB873E) 0B14127C70BEE3379502E174B8D53538 {
+}
+[1761824291.342][DEBUG]: DevTools WebSocket Command: Target.setAutoAttach (id=9) (session_id=44C3F9AAE69DF92B65CBDC5744FB873E) 0B14127C70BEE3379502E174B8D53538 {
+   "autoAttach": true,
+   "flatten": true,
+   "waitForDebuggerOnStart": false
+}
+[1761824291.342][DEBUG]: DevTools WebSocket Response: Target.setAutoAttach (id=4) (session_id=FB0C48841B492A6EA538D73D05193A03) EF37AF034CD39677011C0F8DFF038025 {
+}
+[1761824291.390][DEBUG]: DevTools WebSocket Response: Page.enable (id=5) (session_id=44C3F9AAE69DF92B65CBDC5744FB873E) 0B14127C70BEE3379502E174B8D53538 {
+}
+[1761824291.390][DEBUG]: DevTools WebSocket Response: Page.addScriptToEvaluateOnNewDocument (id=6) (session_id=44C3F9AAE69DF92B65CBDC5744FB873E) 0B14127C70BEE3379502E174B8D53538 {
+   "identifier": "1"
+}
+[1761824291.390][DEBUG]: DevTools WebSocket Response: Runtime.evaluate (id=7) (session_id=44C3F9AAE69DF92B65CBDC5744FB873E) 0B14127C70BEE3379502E174B8D53538 {
+   "result": {
+      "type": "undefined"
+   }
+}
+[1761824291.390][DEBUG]: DevTools WebSocket Response: Log.enable (id=8) (session_id=44C3F9AAE69DF92B65CBDC5744FB873E) 0B14127C70BEE3379502E174B8D53538 {
+}
+[1761824291.390][DEBUG]: DevTools WebSocket Response: Target.setAutoAttach (id=9) (session_id=44C3F9AAE69DF92B65CBDC5744FB873E) 0B14127C70BEE3379502E174B8D53538 {
+}
+[1761824291.390][DEBUG]: DevTools WebSocket Command: Runtime.enable (id=10) (session_id=44C3F9AAE69DF92B65CBDC5744FB873E) 0B14127C70BEE3379502E174B8D53538 {
+}
+[1761824291.395][DEBUG]: DevTools WebSocket Event: Page.loadEventFired (session_id=44C3F9AAE69DF92B65CBDC5744FB873E) 0B14127C70BEE3379502E174B8D53538 {
+   "timestamp": 119728.039983
+}
+[1761824291.396][DEBUG]: DevTools WebSocket Event: Page.frameStoppedLoading (session_id=44C3F9AAE69DF92B65CBDC5744FB873E) 0B14127C70BEE3379502E174B8D53538 {
+   "frameId": "0B14127C70BEE3379502E174B8D53538"
+}
+[1761824291.397][DEBUG]: DevTools WebSocket Event: Runtime.executionContextCreated (session_id=44C3F9AAE69DF92B65CBDC5744FB873E) 0B14127C70BEE3379502E174B8D53538 {
+   "context": {
+      "auxData": {
+         "frameId": "705F1836072296927F29D299ED6DEFC9",
+         "isDefault": true,
+         "type": "default"
+      },
+      "id": 2,
+      "name": "",
+      "origin": "chrome://new-tab-page",
+      "uniqueId": "-3932499075942679629.-5530392258477971289"
+   }
+}
+[1761824291.397][DEBUG]: DevTools WebSocket Event: Runtime.executionContextCreated (session_id=44C3F9AAE69DF92B65CBDC5744FB873E) 0B14127C70BEE3379502E174B8D53538 {
+   "context": {
+      "auxData": {
+         "frameId": "0B14127C70BEE3379502E174B8D53538",
+         "isDefault": true,
+         "type": "default"
+      },
+      "id": 1,
+      "name": "",
+      "origin": "chrome://new-tab-page",
+      "uniqueId": "-932972675563137870.7132746288032839586"
+   }
+}
+[1761824291.397][DEBUG]: DevTools WebSocket Response: Runtime.enable (id=10) (session_id=44C3F9AAE69DF92B65CBDC5744FB873E) 0B14127C70BEE3379502E174B8D53538 {
+}
+[1761824291.397][DEBUG]: DevTools WebSocket Command: Runtime.enable (id=11) (session_id=44C3F9AAE69DF92B65CBDC5744FB873E) 0B14127C70BEE3379502E174B8D53538 {
+}
+[1761824291.398][DEBUG]: DevTools WebSocket Response: Runtime.enable (id=11) (session_id=44C3F9AAE69DF92B65CBDC5744FB873E) 0B14127C70BEE3379502E174B8D53538 {
+}
+[1761824291.398][INFO]: [f6ea54244227825c6675c9ec474484f1] RESPONSE InitSession {
+   "capabilities": {
+      "acceptInsecureCerts": true,
+      "browserName": "chrome",
+      "browserVersion": "142.0.7444.60",
+      "chrome": {
+         "chromedriverVersion": "142.0.7444.59 (4b8153ab58d3c3f4c9f7e4baad9616ecf80db5fa-refs/branch-heads/7444_52@{#4})",
+         "userDataDir": "D:\\PROJECT\\SBA\\CONSUM_SCREEN_PAGE_BY_SE_C\\ConsummerScreenPageBot\\\\chrome-profile"
+      },
+      "fedcm:accounts": true,
+      "goog:chromeOptions": {
+         "debuggerAddress": "localhost:8889"
+      },
+      "goog:processID": 20800,
+      "networkConnectionEnabled": false,
+      "pageLoadStrategy": "eager",
+      "platformName": "windows",
+      "proxy": {
+      },
+      "setWindowRect": true,
+      "strictFileInteractability": false,
+      "timeouts": {
+         "implicit": 0,
+         "pageLoad": 300000,
+         "script": 30000
+      },
+      "unhandledPromptBehavior": "dismiss and notify",
+      "webauthn:extension:credBlob": true,
+      "webauthn:extension:largeBlob": true,
+      "webauthn:extension:minPinLength": true,
+      "webauthn:extension:prf": true,
+      "~~~": "..."
+   },
+   "sessionId": "f6ea54244227825c6675c9ec474484f1"
+}
+[1761824307.113][INFO]: [f6ea54244227825c6675c9ec474484f1] COMMAND Quit {
+}
+[1761824307.113][DEBUG]: DevTools WebSocket Command: Browser.close (id=12) (session_id=) browser {
+}
+[1761824307.630][INFO]: [f6ea54244227825c6675c9ec474484f1] RESPONSE Quit
+[1761824307.630][DEBUG]: Log type 'driver' lost 0 entries on destruction
+[1761824307.630][DEBUG]: Log type 'browser' lost 0 entries on destruction
