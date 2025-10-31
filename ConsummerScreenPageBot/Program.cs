@@ -17,13 +17,17 @@ using WebDriverManager;
 using WebDriverManager.DriverConfigs.Impl;
 using System.Threading;
 using System.Collections.Generic;
+using System.Net.Sockets;
+using System.Net;
 
 namespace ConsummerScreenPageBot
 {
     class Program
     {
         private static string startupPath = AppDomain.CurrentDomain.BaseDirectory.Replace(@"\bin\Debug\net8.0", @"\");
-        public static string rabbit_queue_name = ConfigurationManager.AppSettings["RabbitQueue"] ?? "QUEUE_PROCESS_IMAGE_SCREEN";
+        public static string rabbit_queue_name = ConfigurationManager.AppSettings["RabbitQueue"] ?? "";
+        public static string RabbitQueueAnalyze = ConfigurationManager.AppSettings["RabbitQueueAnalyze"] ?? "";
+        
         public static string rabbit_host = ConfigurationManager.AppSettings["RabbitHost"] ?? "";
         public static string rabbit_vhost = ConfigurationManager.AppSettings["RabbitVHost"] ?? "";
         public static int rabbit_port = Convert.ToInt32(ConfigurationManager.AppSettings["RabbitPort"] ?? "5672");
@@ -33,6 +37,11 @@ namespace ConsummerScreenPageBot
         public static string LogPath = ConfigurationManager.AppSettings["PATHLOG"] ?? "logs";
         public static string is_headless = ConfigurationManager.AppSettings["is_headless"] ?? "0";
         public static string websites_config = ConfigurationManager.AppSettings["Websites"] ?? "";
+
+        // Publisher for analyze queue
+        private static readonly object analyzePubLock = new object();
+        private static IConnection? analyzeConnection;
+        private static IModel? analyzeChannel;
 
         static void Main(string[] args)
         {
@@ -107,8 +116,33 @@ namespace ConsummerScreenPageBot
                 // thì tự tải về và trỏ ChromeDriver tương ứng. Nhờ vậy khi Chrome nâng cấp, driver cũng luôn khớp.
                 try
                 {
-                    new WebDriverManager.DriverManager().SetUpDriver(new ChromeConfig());
-                    Console.WriteLine("WebDriverManager: ensured matching ChromeDriver.");
+                    // Force WebDriverManager to download a ChromeDriver matching the installed Chrome version
+                    var installedChromeVersion = string.Empty;
+                    try
+                    {
+                        if (!string.IsNullOrWhiteSpace(chrome_option.BinaryLocation) && File.Exists(chrome_option.BinaryLocation))
+                        {
+                            var fv = FileVersionInfo.GetVersionInfo(chrome_option.BinaryLocation);
+                            installedChromeVersion = fv.FileVersion ?? string.Empty;
+                        }
+                    }
+                    catch { }
+
+                    if (!string.IsNullOrWhiteSpace(installedChromeVersion))
+                    {
+                        Console.WriteLine($"Detected Chrome version: {installedChromeVersion}");
+                        // Many WebDriverManager implementations accept a version prefix (e.g., 141) to resolve the latest patch of that major
+                        var major = installedChromeVersion.Split('.')?.FirstOrDefault();
+                        var versionHint = string.IsNullOrWhiteSpace(major) ? installedChromeVersion : major;
+                        new WebDriverManager.DriverManager().SetUpDriver(new ChromeConfig(), versionHint);
+                        Console.WriteLine($"WebDriverManager: ensured ChromeDriver for Chrome {versionHint}.");
+                    }
+                    else
+                    {
+                        // Fallback to default resolution if we could not read Chrome's version
+                        new WebDriverManager.DriverManager().SetUpDriver(new ChromeConfig());
+                        Console.WriteLine("WebDriverManager: ensured ChromeDriver (no explicit version hint).");
+                    }
                 }
                 catch (Exception wdmEx)
                 {
@@ -120,21 +154,52 @@ namespace ConsummerScreenPageBot
                 service.EnableVerboseLogging = true;
                 service.LogPath = Path.Combine(LogPath, "chromedriver.log");
 
-                // Fix 4: Thêm kiểm tra biến môi trường DISPLAY trên Linux, cảnh báo nếu thiếu
-                #if !WINDOWS
-                var display = Environment.GetEnvironmentVariable("DISPLAY");
-                if (string.IsNullOrWhiteSpace(display) && is_headless != "1")
+                // Fix 4: Chỉ cảnh báo DISPLAY trên hệ điều hành không phải Windows (Linux/Unix)
+                try
                 {
-                    Console.WriteLine("No DISPLAY found! Your environment probably needs to run with is_headless=1. Otherwise, Chrome cannot start without a display server.");
+                    if (!OperatingSystem.IsWindows())
+                    {
+                        var display = Environment.GetEnvironmentVariable("DISPLAY");
+                        if (string.IsNullOrWhiteSpace(display) && is_headless != "1")
+                        {
+                            Console.WriteLine("No DISPLAY found! Your environment probably needs to run with is_headless=1. Otherwise, Chrome cannot start without a display server.");
+                        }
+                    }
                 }
-                #endif
+                catch { }
 
                 try
                 {
                     using (var browers = new ChromeDriver(service, chrome_option, TimeSpan.FromMinutes(3)))
-                    {
-                        
+                    {  
+                         // DNS & TCP reachability diagnostics before creating RabbitMQ connection
+                        // try
+                        // {
+                        //     Console.WriteLine("Resolving host: " + rabbit_host);
+                        //     var addresses = Dns.GetHostAddresses(rabbit_host);
+                        //     Console.WriteLine("Resolved IPs: " + string.Join(", ", addresses.Select(a => a.ToString())));
 
+                        //     using (var tcp = new TcpClient())
+                        //     {
+                        //         var connectTask = tcp.ConnectAsync(rabbit_host, rabbit_port);
+                        //         if (!connectTask.Wait(TimeSpan.FromSeconds(5)))
+                        //         {
+                        //             Console.WriteLine($"TCP precheck: timeout connecting to {rabbit_host}:{rabbit_port} (5s)");
+                        //         }
+                        //         else if (!tcp.Connected)
+                        //         {
+                        //             Console.WriteLine($"TCP precheck: failed to connect to {rabbit_host}:{rabbit_port}");
+                        //         }
+                        //         else
+                        //         {
+                        //             Console.WriteLine($"TCP precheck: connected to {rabbit_host}:{rabbit_port}");
+                        //         }
+                        //     }
+                        // }
+                        // catch (Exception preEx)
+                        // {
+                        //     Console.WriteLine("TCP/DNS precheck error: " + preEx.Message);
+                        // }
                         #region WAITING QUEUE
                         var factory = new ConnectionFactory()
                         {
@@ -145,7 +210,7 @@ namespace ConsummerScreenPageBot
                             Port = rabbit_port,
                             AutomaticRecoveryEnabled = true,
                             NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
-                            RequestedConnectionTimeout = TimeSpan.FromSeconds(10),
+                            RequestedConnectionTimeout = TimeSpan.FromSeconds(30),
                             RequestedHeartbeat = TimeSpan.FromSeconds(30)
                         };
                         if (rabbit_use_ssl == "1" || rabbit_port == 5671)
@@ -183,13 +248,13 @@ namespace ConsummerScreenPageBot
                                     Console.WriteLine("Received banner data Queue: {0}", message + "----------");
                                     // Đọc link_web từ message (dạng JSON)
                                     string siteUrl = "";
-                                    
+                                    int segment_page = 10;
                                     var jobj = JObject.Parse(message);
-                                    siteUrl = jobj["link_web"]?.ToString() ?? ""; 
-                                  
+                                    siteUrl = jobj["link_web"]?.ToString() ?? "";
+                                    segment_page = jobj["slice"] != null ? jobj["slice"].ToObject<int>() : 10;
+                                    
                                     try
-                                    {
-                                        
+                                    {                                        
                                         Console.WriteLine("Navigate: " + siteUrl);
                                         if (!TryNavigate(browers, siteUrl, TimeSpan.FromSeconds(60), out var failReason))
                                         {
@@ -197,7 +262,7 @@ namespace ConsummerScreenPageBot
                                             ErrorWriter.WriteLog(LogPath, "NavigateFail", $"{siteUrl} => {failReason}");
                                             
                                         }
-                                        ProcessWebsite(browers, siteUrl);
+                                        ProcessWebsite(browers, siteUrl, segment_page);
                                     }
                                     catch (Exception siteEx)
                                     {
@@ -270,7 +335,7 @@ namespace ConsummerScreenPageBot
             }
         }
 
-        private static void ProcessWebsite(IWebDriver driver, string url)
+        private static void ProcessWebsite(IWebDriver driver, string url,int segment_page = 10)
         {
             string host;
             try
@@ -306,8 +371,8 @@ namespace ConsummerScreenPageBot
             // Chụp thêm ảnh full page để đảm bảo lưu toàn bộ quảng cáo xuất hiện trên trang
             //CaptureFullPageScreenshot(driver, host);
 
-            // Chụp 5 ảnh chia đều toàn bộ chiều dài trang
-            CaptureSegmentScreenshots(driver, host, 10);
+            // Chụp segment chia đều toàn bộ chiều dài trang
+            CaptureSegmentScreenshots(driver, host, segment_page);
         }
 
         private static void HandleVnExpress(IWebDriver driver)
@@ -319,32 +384,79 @@ namespace ConsummerScreenPageBot
             }
             catch { }
 
-            // Common ad containers on VnExpress
-            var siteSpecific = new[]
+            // Đảm bảo top ads render trước khi chụp
+            EnsureTopAdsOnVnExpress(driver, TimeSpan.FromSeconds(8));            
+
+        }
+
+        // Quay lên đầu trang, kích lazy-load và chờ banner/iframe hiển thị gần đầu trang
+        private static void EnsureTopAdsOnVnExpress(IWebDriver driver, TimeSpan maxWait)
+        {
+            var js = (IJavaScriptExecutor)driver;
+            try { js.ExecuteScript("window.scrollTo(0, 0);"); } catch { }
+
+            var end = DateTime.UtcNow + maxWait;
+            int stable = 0;
+            int lastCount = -1;
+
+            while (DateTime.UtcNow < end)
             {
-                // Banner ads
-                "div.banner, section.banner, #banner, [id*='banner'], .banner-ad, .banner-ads, [class*='banner-ads']",
+                try
+                {
+                    // lắc scroll nhỏ để kích hoạt observer
+                    try { js.ExecuteScript("window.scrollTo(0, 40);"); } catch { }
+                    System.Threading.Thread.Sleep(120);
+                    try { js.ExecuteScript("window.scrollTo(0, 0);"); } catch { }
+                }
+                catch { }
 
-                // Ads in general
-                "div.ads, .ads, [id*='ads'], [class*='ad-'], [class*='ads-'], .ads_box, .ad-container, .adsense",
+                int visibleTopAds = 0;
+                try
+                {
+                    var script = @"
+                        const sels = [
+                          'header .banner', 'header [id*=\\'banner\\']', 'header [class*=\\'banner\\']',
+                          '#banner_top', '.banner-top', '.top-banner', '.leaderboard', '.top-ads', '.banner-leaderboard',
+                          '[id^=\\'div-gpt-ad\\']', '[id*=\\'gpt-ad\\']', '.gpt-ad', '.dfp-ad', '.ad-slot', '.ad-container'
+                        ].join(',');
+                        const minW = 120, minH = 30, maxY = 900;
+                        const y = window.scrollY || window.pageYOffset || 0;
+                        let count = 0;
+                        const list = Array.from(document.querySelectorAll(sels));
+                        for (const el of list) {
+                          try {
+                            const r = el.getBoundingClientRect();
+                            const w = Math.round(r.width), h = Math.round(r.height);
+                            const top = Math.round(r.top + y);
+                            if (w >= minW && h >= minH && top < maxY) count++;
+                          } catch {}
+                        }
+                        const ifr = Array.from(document.querySelectorAll('iframe,frame'));
+                        for (const el of ifr) {
+                          try {
+                            const r = el.getBoundingClientRect();
+                            const w = Math.round(r.width), h = Math.round(r.height);
+                            const top = Math.round(r.top + y);
+                            if (w >= minW && h >= minH && top < maxY) count++;
+                          } catch {}
+                        }
+                        return count;
+                    ";
+                    visibleTopAds = Convert.ToInt32(js.ExecuteScript(script) ?? 0);
+                }
+                catch { }
 
-                // Advertisement containers
-                "div.advertisement, .advertisement, [id*='advt'], .advertise",
+                if (visibleTopAds <= 0)
+                {
+                    System.Threading.Thread.Sleep(220);
+                    continue;
+                }
 
-                // Footer and header ads
-                "#footer-ad, .footer-ad, .footer-banner, .footer-advertisement",
+                if (visibleTopAds == lastCount) stable++; else { stable = 0; lastCount = visibleTopAds; }
+                if (stable >= 2) break;
 
-                // In-content ads or popups
-                ".in-content-ad, .ad-popup, .interstitial-ad, .native-ad, .article-ad, .article-advertisement",
-
-                // Sidebar ads
-                ".sidebar-ad, .right-ad, .left-ad, .sticky-ad, .floating-ad"
-            };
-            var selectors = AdCapture.GetCommonAdSelectors().Concat(siteSpecific).ToArray();
-            // Chụp các phần tử quảng cáo trong DOM chính
-            AdCapture.CaptureBySelectors(driver, selectors, "vnexpress.net", startupPath, LogPath);
-            // Chụp trực tiếp các iframe (nhiều banner nằm nguyên trong iframe)
-            AdCapture.CaptureAdIframes(driver, "vnexpress.net", startupPath, LogPath);
+                System.Threading.Thread.Sleep(180);
+            }
         }
 
         // Xóa tất cả file ảnh trong thư mục screenshots/<hostLabel>
@@ -445,6 +557,9 @@ namespace ConsummerScreenPageBot
                 var shotsDir = Path.Combine(startupPath, "screenshots", hostLabel);
                 if (!Directory.Exists(shotsDir)) Directory.CreateDirectory(shotsDir);
 
+                // Phát hiện vị trí (top/bottom) của các khối quảng cáo để tránh cắt ngang khi chia đoạn
+                var adRects = TryDetectAdRects(driver);
+
                 var chrome = driver as ChromeDriver;
                 if (chrome != null)
                 {
@@ -457,6 +572,7 @@ namespace ConsummerScreenPageBot
                         { "scale", 1 }
                     };
 
+                    int lastStart = 0;
                     for (int i = 0; i < segmentCount; i++)
                     {
                         int y = i * segmentHeight;
@@ -469,7 +585,10 @@ namespace ConsummerScreenPageBot
                         };
                         try { chrome.ExecuteCdpCommand("Emulation.setDeviceMetricsOverride", metrics); } catch { }
 
-                        // Cuộn đến offset tương ứng
+                        // Tìm toạ độ cuộn an toàn để tránh cắt ngang các khối quảng cáo tại biên trên/dưới
+                        y = AdjustSliceStartToAvoidAds(y, currentHeight, totalHeight, adRects, lastStart);
+
+                        // Cuộn đến offset tương ứng (đã điều chỉnh an toàn)
                         try { js.ExecuteScript("window.scrollTo(0, arguments[0]);", y); } catch { }
                         Thread.Sleep(350);
 
@@ -478,6 +597,12 @@ namespace ConsummerScreenPageBot
                         var fileName = $"split{i+1}_{DateTime.Now:yyyyMMdd_HHmmss_fff}_{Guid.NewGuid().ToString("N").Substring(0,6)}.png";
                         var savePath = Path.Combine(shotsDir, fileName);
                         shot.SaveAsFile(savePath);
+
+                        // Gửi ảnh segment sang queue phân tích dưới dạng base64
+                        TryPublishAnalyze(shot.AsByteArray);
+
+                        // Đảm bảo tiến triển tăng dần, thêm một chồng lấn nhỏ để không bỏ sót nội dung
+                        lastStart = Math.Max(lastStart, y + Math.Max(1, currentHeight - 20));
                     }
                 }
                 else
@@ -493,6 +618,9 @@ namespace ConsummerScreenPageBot
                         var savePath = Path.Combine(startupPath, "screenshots", hostLabel, fileName);
                         Directory.CreateDirectory(Path.GetDirectoryName(savePath)!);
                         shot.SaveAsFile(savePath);
+
+                        // Gửi ảnh segment sang queue phân tích dưới dạng base64
+                        TryPublishAnalyze(shot.AsByteArray);
                     }
                 }
             }
@@ -500,6 +628,222 @@ namespace ConsummerScreenPageBot
             {
                 ErrorWriter.WriteLog(LogPath, "SegmentScreenshots", ex.ToString());
             }
+        }
+
+        private static void TryPublishAnalyze(byte[] imageBytes)
+        {
+            try
+            {
+                if (imageBytes == null || imageBytes.Length == 0) return;
+                if (string.IsNullOrWhiteSpace(RabbitQueueAnalyze)) return;
+                EnsureAnalyzePublisherReady();
+                if (analyzeChannel == null) return;
+
+                var base64 = Convert.ToBase64String(imageBytes);
+                var payload = $"{{ \"screenshot_base64\": \"{base64}\" }}";
+                var body = Encoding.UTF8.GetBytes(payload);
+
+                var props = analyzeChannel.CreateBasicProperties();
+                props.Persistent = true;
+
+                analyzeChannel.BasicPublish(exchange: "",
+                                            routingKey: RabbitQueueAnalyze,
+                                            basicProperties: props,
+                                            body: body);
+            }
+            catch (Exception ex)
+            {
+                ErrorWriter.WriteLog(LogPath, "PublishAnalyze", ex.ToString());
+            }
+        }
+
+        private static void EnsureAnalyzePublisherReady()
+        {
+            if (analyzeChannel != null && analyzeChannel.IsOpen) return;
+            lock (analyzePubLock)
+            {
+                try
+                {
+                    if (analyzeChannel != null && analyzeChannel.IsOpen) return;
+
+                    analyzeConnection?.Dispose();
+                    analyzeChannel?.Dispose();
+
+                    var factory = new ConnectionFactory()
+                    {
+                        HostName = rabbit_host,
+                        UserName = rabbit_username,
+                        Password = rabbit_password,
+                        VirtualHost = string.IsNullOrWhiteSpace(rabbit_vhost) ? "/" : rabbit_vhost,
+                        Port = rabbit_port,
+                        AutomaticRecoveryEnabled = true,
+                        NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
+                        RequestedConnectionTimeout = TimeSpan.FromSeconds(30),
+                        RequestedHeartbeat = TimeSpan.FromSeconds(30)
+                    };
+                    if (rabbit_use_ssl == "1" || rabbit_port == 5671)
+                    {
+                        factory.Ssl = new SslOption
+                        {
+                            Enabled = true,
+                            ServerName = rabbit_host,
+                            AcceptablePolicyErrors = System.Net.Security.SslPolicyErrors.None
+                        };
+                    }
+
+                    analyzeConnection = factory.CreateConnection();
+                    analyzeChannel = analyzeConnection.CreateModel();
+                    analyzeChannel.QueueDeclare(queue: RabbitQueueAnalyze,
+                                                durable: true,
+                                                exclusive: false,
+                                                autoDelete: false,
+                                                arguments: null);
+                }
+                catch (Exception ex)
+                {
+                    ErrorWriter.WriteLog(LogPath, "EnsureAnalyzePublisher", ex.ToString());
+                }
+            }
+        }
+
+        // Lấy danh sách các rect (top/bottom theo toạ độ tài liệu) của các phần tử có khả năng là quảng cáo
+        private static List<(int Top, int Bottom)> TryDetectAdRects(IWebDriver driver)
+        {
+            var results = new List<(int Top, int Bottom)>();
+            try
+            {
+                var selectors = string.Join(", ", GetCommonAdSelectors());
+                var script = @"
+                    const sels = arguments[0];
+                    const minW = 120, minH = 30;
+                    const list = Array.from(document.querySelectorAll(sels));
+                    const y = window.scrollY || window.pageYOffset || 0;
+                    const rects = [];
+                    for (const el of list) {
+                        try {
+                            const r = el.getBoundingClientRect();
+                            const w = Math.round(r.width);
+                            const h = Math.round(r.height);
+                            if (w >= minW && h >= minH) {
+                                const top = Math.max(0, Math.round(r.top + y));
+                                const bottom = Math.max(top, Math.round(r.bottom + y));
+                                rects.push([top, bottom]);
+                            }
+                        } catch {}
+                    }
+                    rects
+                ";
+                var raw = (System.Collections.IEnumerable)((IJavaScriptExecutor)driver).ExecuteScript(script, selectors);
+                foreach (var item in raw)
+                {
+                    var pair = item as System.Collections.IList;
+                    if (pair != null && pair.Count >= 2)
+                    {
+                        int top = Convert.ToInt32(pair[0]);
+                        int bottom = Convert.ToInt32(pair[1]);
+                        if (bottom > top) results.Add((top, bottom));
+                    }
+                }
+
+                // Gộp/đơn giản hoá các rect chồng lấn để tính toán nhanh hơn
+                results = MergeOverlappingRects(results);
+            }
+            catch { }
+            return results;
+        }
+
+        // Hợp nhất các khoảng [top,bottom] chồng lấn
+        private static List<(int Top, int Bottom)> MergeOverlappingRects(List<(int Top, int Bottom)> rects)
+        {
+            if (rects == null || rects.Count == 0) return new List<(int Top, int Bottom)>();
+            var ordered = rects.OrderBy(r => r.Top).ToList();
+            var merged = new List<(int Top, int Bottom)>();
+            var cur = ordered[0];
+            for (int i = 1; i < ordered.Count; i++)
+            {
+                var r = ordered[i];
+                if (r.Top <= cur.Bottom)
+                {
+                    cur = (cur.Top, Math.Max(cur.Bottom, r.Bottom));
+                }
+                else
+                {
+                    merged.Add(cur);
+                    cur = r;
+                }
+            }
+            merged.Add(cur);
+            return merged;
+        }
+
+        // Điều chỉnh toạ độ bắt đầu của lát cắt sao cho biên trên/dưới không nằm giữa một khối quảng cáo
+        private static int AdjustSliceStartToAvoidAds(int proposedY, int viewportHeight, int totalHeight, List<(int Top, int Bottom)> adRects, int minY)
+        {
+            if (adRects == null || adRects.Count == 0)
+            {
+                return Math.Max(0, Math.Min(proposedY, totalHeight - viewportHeight));
+            }
+
+            int margin = 4; // khoảng đệm nhỏ
+            int bestY = proposedY;
+
+            Func<int, bool> isBoundarySafe = (y) =>
+            {
+                int topLine = y + margin;
+                int bottomLine = y + viewportHeight - margin;
+                foreach (var r in adRects)
+                {
+                    if (r.Top < topLine && topLine < r.Bottom) return false;      // biên trên cắt ngang
+                    if (r.Top < bottomLine && bottomLine < r.Bottom) return false; // biên dưới cắt ngang
+                }
+                return true;
+            };
+
+            bestY = Math.Max(minY, Math.Max(0, Math.Min(proposedY, totalHeight - viewportHeight)));
+            if (isBoundarySafe(bestY)) return bestY;
+
+            // Thử dịch lên/xuống trong một khoảng giới hạn để tìm điểm an toàn gần nhất
+            int searchRadius = Math.Min(200, viewportHeight / 3);
+            int lowBound = Math.Max(minY, Math.Max(0, bestY - searchRadius));
+            int highBound = Math.Min(totalHeight - viewportHeight, bestY + searchRadius);
+
+            int nearest = bestY;
+            int bestDist = int.MaxValue;
+            for (int dy = 0; dy <= searchRadius; dy++)
+            {
+                int up = bestY - dy;
+                if (up >= lowBound && isBoundarySafe(up))
+                {
+                    nearest = up; bestDist = dy; break;
+                }
+                int down = bestY + dy;
+                if (down <= highBound && isBoundarySafe(down))
+                {
+                    nearest = down; bestDist = dy; break;
+                }
+            }
+
+            if (bestDist != int.MaxValue) return nearest;
+
+            // Nếu không tìm được điểm hoàn hảo, rơi về việc neo tại mép của khối gần nhất (ưu tiên neo trên/dưới)
+            foreach (var r in adRects)
+            {
+                // nếu biên trên rơi giữa khối, đưa lên đầu khối
+                if (r.Top < bestY && bestY < r.Bottom)
+                {
+                    int candidate = Math.Max(minY, Math.Min(r.Top - margin, totalHeight - viewportHeight));
+                    if (candidate >= minY) return candidate;
+                }
+                // nếu biên dưới rơi giữa khối, đẩy xuống cuối khối
+                int bottomLine = bestY + viewportHeight;
+                if (r.Top < bottomLine && bottomLine < r.Bottom)
+                {
+                    int candidate = Math.Min(totalHeight - viewportHeight, r.Bottom + margin);
+                    if (candidate >= minY) return candidate;
+                }
+            }
+
+            return Math.Max(minY, Math.Max(0, Math.Min(bestY, totalHeight - viewportHeight)));
         }
 
         private static void HandleThanhNien(IWebDriver driver)
@@ -511,22 +855,26 @@ namespace ConsummerScreenPageBot
             }
             catch { }
 
-            // Common ad containers on ThanhNien
+            // Đảm bảo khu vực top ads sẵn sàng
+            EnsureTopAdsNearTop(driver, TimeSpan.FromSeconds(8));
+
             var siteSpecific = new[]
             {
-                "div.banner, #banner, [id*='banner'], .banner-ad, .banner-ads, [class*='banner-ads'], .qc, .quangcao",
-                "div.ads, .ads, [id*='ads'], [class*='ad-'], [class*='ads-']",
-                "div.advertisement, .advertisement"
+                "header .banner, header [id*='banner'], header [class*='banner']",
+                "#banner_top, .banner-top, .top-banner, .leaderboard, .top-ads, .banner-leaderboard",
+                "[id^='div-gpt-ad'], [id*='gpt-ad'], .gpt-ad, .dfp-ad, .ad-slot, .ad-container",
+                ".qc, .quangcao"
             };
             var selectors = AdCapture.GetCommonAdSelectors().Concat(siteSpecific).ToArray();
-            // Chụp các phần tử quảng cáo trong DOM chính
             AdCapture.CaptureBySelectors(driver, selectors, "thanhnien.vn", startupPath, LogPath);
-            // Chụp trực tiếp các iframe chứa quảng cáo
             AdCapture.CaptureAdIframes(driver, "thanhnien.vn", startupPath, LogPath);
         }
 
         private static void CaptureGenericBanners(IWebDriver driver, string hostLabel)
         {
+            // Đảm bảo khu vực top ads sẵn sàng trên các trang khác
+            EnsureTopAdsNearTop(driver, TimeSpan.FromSeconds(6));
+
             var siteSpecific = new[]
             {
                 "div.banner, section.banner, header .banner",
@@ -558,6 +906,76 @@ namespace ConsummerScreenPageBot
         // (moved to Utils/AdCapture.cs)
 
         // (moved to Utils/AdCapture.cs)
+
+        // Generic: quay lên đầu trang, kích lazy-load và chờ banner/iframe hiện ở gần đầu trang (áp dụng rộng rãi)
+        private static void EnsureTopAdsNearTop(IWebDriver driver, TimeSpan maxWait)
+        {
+            var js = (IJavaScriptExecutor)driver;
+            try { js.ExecuteScript("window.scrollTo(0, 0);"); } catch { }
+
+            var end = DateTime.UtcNow + maxWait;
+            int stable = 0;
+            int lastCount = -1;
+
+            while (DateTime.UtcNow < end)
+            {
+                try
+                {
+                    try { js.ExecuteScript("window.scrollTo(0, 60);"); } catch { }
+                    System.Threading.Thread.Sleep(120);
+                    try { js.ExecuteScript("window.scrollTo(0, 0);"); } catch { }
+                }
+                catch { }
+
+                int visibleTopAds = 0;
+                try
+                {
+                    var script = @"
+                        const sels = [
+                          'header .banner', 'header [id*=\\'banner\\']', 'header [class*=\\'banner\\']',
+                          '#banner_top', '.banner-top', '.top-banner', '.leaderboard', '.top-ads', '.banner-leaderboard',
+                          '[id^=\\'div-gpt-ad\\']', '[id*=\\'gpt-ad\\']', '.gpt-ad', '.dfp-ad', '.ad-slot', '.ad-container',
+                          '[id*=\\'ads\\']', '[class*=\\'ad-\\']', '[class*=\\'-ad\\']', '.ads', '.advertisement'
+                        ].join(',');
+                        const minW = 120, minH = 30, maxY = 900;
+                        const y = window.scrollY || window.pageYOffset || 0;
+                        let count = 0;
+                        const list = Array.from(document.querySelectorAll(sels));
+                        for (const el of list) {
+                          try {
+                            const r = el.getBoundingClientRect();
+                            const w = Math.round(r.width), h = Math.round(r.height);
+                            const top = Math.round(r.top + y);
+                            if (w >= minW && h >= minH && top < maxY) count++;
+                          } catch {}
+                        }
+                        const ifr = Array.from(document.querySelectorAll('iframe,frame'));
+                        for (const el of ifr) {
+                          try {
+                            const r = el.getBoundingClientRect();
+                            const w = Math.round(r.width), h = Math.round(r.height);
+                            const top = Math.round(r.top + y);
+                            if (w >= minW && h >= minH && top < maxY) count++;
+                          } catch {}
+                        }
+                        return count;
+                    ";
+                    visibleTopAds = Convert.ToInt32(js.ExecuteScript(script) ?? 0);
+                }
+                catch { }
+
+                if (visibleTopAds <= 0)
+                {
+                    System.Threading.Thread.Sleep(220);
+                    continue;
+                }
+
+                if (visibleTopAds == lastCount) stable++; else { stable = 0; lastCount = visibleTopAds; }
+                if (stable >= 2) break;
+
+                System.Threading.Thread.Sleep(180);
+            }
+        }
 
         private static string FindChromeBinaryPath()
         {

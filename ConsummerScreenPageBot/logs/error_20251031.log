@@ -1,0 +1,6 @@
+[2025-10-31 00:00:28] [CaptureElement] OpenQA.Selenium.StaleElementReferenceException: stale element reference: stale element not found in the current frame
+  (Session info: chrome=142.0.7444.60); For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#stale-element-reference-exception
+   at OpenQA.Selenium.WebDriver.UnpackAndThrowOnError(Response errorResponse, String commandToExecute)
+   at OpenQA.Selenium.WebDriver.Execute(String driverCommandToExecute, Dictionary`2 parameters)
+   at OpenQA.Selenium.WebElement.get_Size()
+   at ConsummerScreenPageBot.AdCapture.CaptureBySelectors(IWebDriver driver, String[] selectors, String hostLabel, String startupPath, String logPath) in F:\PROJECT\CAPTURE_FULL_PAGE_C#_SELELIUM\CONSUM_SCREEN_PAGE_BY_SE_C__GIT\CONSUMMER_Capture_FullPage_By_Selelium_C-\ConsummerScreenPageBot\Utils\AdCapture.cs:line 63
