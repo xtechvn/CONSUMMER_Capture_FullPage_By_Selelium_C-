@@ -10,15 +10,17 @@ using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Linq;
-using System.Drawing;
-using System.Drawing.Imaging;
 using Microsoft.Win32;
-using WebDriverManager;
-using WebDriverManager.DriverConfigs.Impl;
 using System.Threading;
 using System.Collections.Generic;
 using System.Net.Sockets;
 using System.Net;
+using Newtonsoft.Json;
+using ConsummerScreenPageBot.Models;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
+using SixLabors.ImageSharp.Formats.Jpeg;
 
 namespace ConsummerScreenPageBot
 {
@@ -37,11 +39,13 @@ namespace ConsummerScreenPageBot
         public static string LogPath = ConfigurationManager.AppSettings["PATHLOG"] ?? "logs";
         public static string is_headless = ConfigurationManager.AppSettings["is_headless"] ?? "0";
         public static string websites_config = ConfigurationManager.AppSettings["Websites"] ?? "";
+        public static string analyze_publish_raw = ConfigurationManager.AppSettings["AnalyzePublishRaw"] ?? "0";
 
         // Publisher for analyze queue
         private static readonly object analyzePubLock = new object();
         private static IConnection? analyzeConnection;
         private static IModel? analyzeChannel;
+        private static JObject? lastJobParams;
 
         static void Main(string[] args)
         {
@@ -110,45 +114,6 @@ namespace ConsummerScreenPageBot
                 Console.WriteLine("ChromeDriver NuGet version: " + driverVersion);
 
              
-                // SE READY...
-                // Tự động đồng bộ phiên bản ChromeDriver với bản Chrome đang cài trên máy.
-                // Cơ chế: WebDriverManager sẽ kiểm tra version Chrome hiện tại, nếu thiếu hoặc lệch phiên bản
-                // thì tự tải về và trỏ ChromeDriver tương ứng. Nhờ vậy khi Chrome nâng cấp, driver cũng luôn khớp.
-                try
-                {
-                    // Force WebDriverManager to download a ChromeDriver matching the installed Chrome version
-                    var installedChromeVersion = string.Empty;
-                    try
-                    {
-                        if (!string.IsNullOrWhiteSpace(chrome_option.BinaryLocation) && File.Exists(chrome_option.BinaryLocation))
-                        {
-                            var fv = FileVersionInfo.GetVersionInfo(chrome_option.BinaryLocation);
-                            installedChromeVersion = fv.FileVersion ?? string.Empty;
-                        }
-                    }
-                    catch { }
-
-                    if (!string.IsNullOrWhiteSpace(installedChromeVersion))
-                    {
-                        Console.WriteLine($"Detected Chrome version: {installedChromeVersion}");
-                        // Many WebDriverManager implementations accept a version prefix (e.g., 141) to resolve the latest patch of that major
-                        var major = installedChromeVersion.Split('.')?.FirstOrDefault();
-                        var versionHint = string.IsNullOrWhiteSpace(major) ? installedChromeVersion : major;
-                        new WebDriverManager.DriverManager().SetUpDriver(new ChromeConfig(), versionHint);
-                        Console.WriteLine($"WebDriverManager: ensured ChromeDriver for Chrome {versionHint}.");
-                    }
-                    else
-                    {
-                        // Fallback to default resolution if we could not read Chrome's version
-                        new WebDriverManager.DriverManager().SetUpDriver(new ChromeConfig());
-                        Console.WriteLine("WebDriverManager: ensured ChromeDriver (no explicit version hint).");
-                    }
-                }
-                catch (Exception wdmEx)
-                {
-                    Console.WriteLine("WebDriverManager failed: " + wdmEx.Message);
-                }
-
                 // Tạo ChromeDriverService và bật ghi log chi tiết để dễ debug khi lỗi phiên làm việc/khởi tạo
                 var service = ChromeDriverService.CreateDefaultService();
                 service.EnableVerboseLogging = true;
@@ -172,34 +137,7 @@ namespace ConsummerScreenPageBot
                 {
                     using (var browers = new ChromeDriver(service, chrome_option, TimeSpan.FromMinutes(3)))
                     {  
-                         // DNS & TCP reachability diagnostics before creating RabbitMQ connection
-                        // try
-                        // {
-                        //     Console.WriteLine("Resolving host: " + rabbit_host);
-                        //     var addresses = Dns.GetHostAddresses(rabbit_host);
-                        //     Console.WriteLine("Resolved IPs: " + string.Join(", ", addresses.Select(a => a.ToString())));
-
-                        //     using (var tcp = new TcpClient())
-                        //     {
-                        //         var connectTask = tcp.ConnectAsync(rabbit_host, rabbit_port);
-                        //         if (!connectTask.Wait(TimeSpan.FromSeconds(5)))
-                        //         {
-                        //             Console.WriteLine($"TCP precheck: timeout connecting to {rabbit_host}:{rabbit_port} (5s)");
-                        //         }
-                        //         else if (!tcp.Connected)
-                        //         {
-                        //             Console.WriteLine($"TCP precheck: failed to connect to {rabbit_host}:{rabbit_port}");
-                        //         }
-                        //         else
-                        //         {
-                        //             Console.WriteLine($"TCP precheck: connected to {rabbit_host}:{rabbit_port}");
-                        //         }
-                        //     }
-                        // }
-                        // catch (Exception preEx)
-                        // {
-                        //     Console.WriteLine("TCP/DNS precheck error: " + preEx.Message);
-                        // }
+                         
                         #region WAITING QUEUE
                         var factory = new ConnectionFactory()
                         {
@@ -252,6 +190,10 @@ namespace ConsummerScreenPageBot
                                     var jobj = JObject.Parse(message);
                                     siteUrl = jobj["link_web"]?.ToString() ?? "";
                                     segment_page = jobj["slice"] != null ? jobj["slice"].ToObject<int>() : 10;
+                                    long jpegQuality = jobj["quanlity_image"] != null ? jobj["quanlity_image"].ToObject<long>() : 70;
+                                    // Lưu context params để gộp vào payload RabbitQueueAnalyze
+                                    try { lastJobParams = (JObject)jobj.DeepClone(); } catch { lastJobParams = jobj; }
+                                   
                                     
                                     try
                                     {                                        
@@ -262,7 +204,7 @@ namespace ConsummerScreenPageBot
                                             ErrorWriter.WriteLog(LogPath, "NavigateFail", $"{siteUrl} => {failReason}");
                                             
                                         }
-                                        ProcessWebsite(browers, siteUrl, segment_page);
+                                        ProcessWebsite(browers, siteUrl, segment_page, jpegQuality);
                                     }
                                     catch (Exception siteEx)
                                     {
@@ -282,7 +224,9 @@ namespace ConsummerScreenPageBot
 
                             channel.BasicConsume(queue: rabbit_queue_name, autoAck: false, consumer: consumer);
 
-                            Console.ReadLine();
+                            // Giữ tiến trình luôn lắng nghe queue, không tự động thoát
+                            var hold = new ManualResetEventSlim(false);
+                            hold.Wait();
 
                         }
                         catch (Exception ex)
@@ -293,8 +237,7 @@ namespace ConsummerScreenPageBot
                     }
                     
                         #endregion
-
-                        browers.Dispose();
+                        // Không tự động đóng trình duyệt để luôn sẵn sàng nhận job mới
                     }
                 }
                 catch (WebDriverException wdEx)
@@ -335,7 +278,7 @@ namespace ConsummerScreenPageBot
             }
         }
 
-        private static void ProcessWebsite(IWebDriver driver, string url,int segment_page = 10)
+        private static void ProcessWebsite(IWebDriver driver, string url,int segment_page = 10, long jpegQuality = 80)
         {
             string host;
             try
@@ -354,25 +297,25 @@ namespace ConsummerScreenPageBot
             ScrollToBottomAndEnsureLazyContent(driver, TimeSpan.FromSeconds(12));
             TryProbeAdCandidates(driver, TimeSpan.FromSeconds(3));
 
-            switch (host)
-            {
-                case var h when h.Contains("vnexpress.net"):
-                    HandleVnExpress(driver);
-                    break;
-                case var h when h.Contains("thanhnien.vn"):
-                    HandleThanhNien(driver);
-                    break;
-                default:
-                    Console.WriteLine($"No specific handler for host: {host}. Using generic banner capture.");
-                    CaptureGenericBanners(driver, host);
-                    break;
-            }
+            // switch (host)
+            // {
+            //     case var h when h.Contains("vnexpress.net"):
+            //         HandleVnExpress(driver);
+            //         break;
+            //     case var h when h.Contains("thanhnien.vn"):
+            //         HandleThanhNien(driver, jpegQuality);
+            //         break;
+            //     default:
+            //         Console.WriteLine($"No specific handler for host: {host}. Using generic banner capture.");
+            //         CaptureGenericBanners(driver, host, jpegQuality);
+            //         break;
+            // }
 
             // Chụp thêm ảnh full page để đảm bảo lưu toàn bộ quảng cáo xuất hiện trên trang
             //CaptureFullPageScreenshot(driver, host);
 
             // Chụp segment chia đều toàn bộ chiều dài trang
-            CaptureSegmentScreenshots(driver, host, segment_page);
+            CaptureSegmentScreenshots(driver, host, segment_page, jpegQuality);
         }
 
         private static void HandleVnExpress(IWebDriver driver)
@@ -484,7 +427,7 @@ namespace ConsummerScreenPageBot
         }
 
         // Chụp full-page bằng cách đặt kích thước viewport theo kích thước tài liệu qua Chrome DevTools Protocol
-        private static void CaptureFullPageScreenshot(IWebDriver driver, string hostLabel)
+        private static void CaptureFullPageScreenshot(IWebDriver driver, string hostLabel, long jpegQuality)
         {
             try
             {
@@ -522,10 +465,17 @@ namespace ConsummerScreenPageBot
                     try { chrome.ExecuteCdpCommand("Emulation.setDeviceMetricsOverride", metrics); } catch { }
                 }
 
-                var shot = ((ITakesScreenshot)driver).GetScreenshot();
-                var fileName = $"full_{DateTime.Now:yyyyMMdd_HHmmss_fff}_{Guid.NewGuid().ToString("N").Substring(0,6)}.png";
-                var savePath = Path.Combine(shotsDir, fileName);
-                shot.SaveAsFile(savePath);
+                try
+                {
+                    var shot = ((ITakesScreenshot)driver).GetScreenshot();
+                    var fileName = $"full_{DateTime.Now:yyyyMMdd_HHmmss_fff}_{Guid.NewGuid().ToString("N").Substring(0,6)}.jpg";
+                    var savePath = Path.Combine(shotsDir, fileName);
+                    AdCapture.SaveJpegCompressedFromBytes(shot.AsByteArray, savePath, 1.0, jpegQuality);
+                }
+                finally
+                {
+                    try { (driver as ChromeDriver)?.ExecuteCdpCommand("Emulation.clearDeviceMetricsOverride", new Dictionary<string, object>()); } catch { }
+                }
             }
             catch (Exception ex)
             {
@@ -533,104 +483,213 @@ namespace ConsummerScreenPageBot
             }
         }
 
-        // Chụp N phần bằng cách chia tổng chiều cao trang thành N đoạn bằng nhau
-        private static void CaptureSegmentScreenshots(IWebDriver driver, string hostLabel, int segmentCount)
+        private static void CaptureSegmentScreenshots(IWebDriver driver, string hostLabel, int segmentCount, long jpegQuality)
         {
             try
             {
+                try { Console.WriteLine($"[Segment] Start capture host={hostLabel}, segments={segmentCount}, quality={jpegQuality}"); } catch { }
+                if (segmentCount <= 0) segmentCount = 3;
+
                 var js = (IJavaScriptExecutor)driver;
+                // Kích hoạt lazy-load và đợi quảng cáo hiển thị trước khi chụp full
+                ScrollToBottomAndEnsureLazyContent(driver, TimeSpan.FromSeconds(8));
+                WaitForAdsLoaded(driver, TimeSpan.FromSeconds(6));
+                // Phủ lớp trắng lên các ảnh nhỏ (trừ ảnh trong iframe - chỉ chạy trên document hiện tại)
+                try { MaskSmallImages(driver, 120, 80); } catch { }
                 int pageWidth = 1920;
                 int totalHeight = 3000;
                 try
                 {
-                    pageWidth = Convert.ToInt32(js.ExecuteScript("return Math.max(document.documentElement.clientWidth, window.innerWidth || 0);"));
-                    totalHeight = Convert.ToInt32(js.ExecuteScript("return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight) || 0;"));
+                    pageWidth = Convert.ToInt32(js.ExecuteScript("return Math.max(document.documentElement.scrollWidth, document.body.scrollWidth, window.innerWidth || 0);"));
+                    totalHeight = Convert.ToInt32(js.ExecuteScript("return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight, window.innerHeight || 0);"));
                 }
                 catch { }
-
                 if (totalHeight <= 0) totalHeight = 3000;
-                if (segmentCount <= 0) segmentCount = 3;
-                int segmentHeight = (int)Math.Ceiling(totalHeight / (double)segmentCount);
-                // Giới hạn để tránh set quá lớn gây out-of-memory với DevTools
-                segmentHeight = Math.Min(segmentHeight, 10000);
+                totalHeight = Math.Min(totalHeight, 30000);
 
                 var shotsDir = Path.Combine(startupPath, "screenshots", hostLabel);
                 if (!Directory.Exists(shotsDir)) Directory.CreateDirectory(shotsDir);
 
-                // Phát hiện vị trí (top/bottom) của các khối quảng cáo để tránh cắt ngang khi chia đoạn
-                var adRects = TryDetectAdRects(driver);
-
+                // 1) Chụp full page một lần bằng CDP; fallback sang ITakesScreenshot nếu cần
+                byte[] fullShotBytes = Array.Empty<byte>();
                 var chrome = driver as ChromeDriver;
+                bool fullOk = false;
                 if (chrome != null)
                 {
-                    // Cố định chiều rộng, thay đổi chiều cao theo segment
-                    var baseMetrics = new Dictionary<string, object>
+                    var metrics = new Dictionary<string, object>
                     {
                         { "mobile", false },
-                        { "width", pageWidth },
+                        { "width", Math.Max(1, pageWidth) },
+                        { "height", Math.Max(1, totalHeight) },
                         { "deviceScaleFactor", 1 },
                         { "scale", 1 }
                     };
+                    try { chrome.ExecuteCdpCommand("Emulation.setDeviceMetricsOverride", metrics); } catch { }
 
-                    int lastStart = 0;
-                    for (int i = 0; i < segmentCount; i++)
+                    try { chrome.ExecuteCdpCommand("Page.enable", new Dictionary<string, object>()); } catch { }
+
+                    try
                     {
-                        int y = i * segmentHeight;
-                        int currentHeight = Math.Min(segmentHeight, Math.Max(1, totalHeight - y));
-
-                        // Set viewport theo chiều cao của segment hiện tại
-                        var metrics = new Dictionary<string, object>(baseMetrics)
+                        var args = new Dictionary<string, object>
                         {
-                            ["height"] = currentHeight
+                            { "format", "jpeg" },
+                            { "quality", 100 },
+                            { "captureBeyondViewport", true }
                         };
-                        try { chrome.ExecuteCdpCommand("Emulation.setDeviceMetricsOverride", metrics); } catch { }
-
-                        // Tìm toạ độ cuộn an toàn để tránh cắt ngang các khối quảng cáo tại biên trên/dưới
-                        y = AdjustSliceStartToAvoidAds(y, currentHeight, totalHeight, adRects, lastStart);
-
-                        // Cuộn đến offset tương ứng (đã điều chỉnh an toàn)
-                        try { js.ExecuteScript("window.scrollTo(0, arguments[0]);", y); } catch { }
-                        Thread.Sleep(350);
-
-                        // Chụp ảnh viewport (chính là 1/3 trang)
-                        var shot = ((ITakesScreenshot)driver).GetScreenshot();
-                        var fileName = $"split{i+1}_{DateTime.Now:yyyyMMdd_HHmmss_fff}_{Guid.NewGuid().ToString("N").Substring(0,6)}.png";
-                        var savePath = Path.Combine(shotsDir, fileName);
-                        shot.SaveAsFile(savePath);
-
-                        // Gửi ảnh segment sang queue phân tích dưới dạng base64
-                        TryPublishAnalyze(shot.AsByteArray);
-
-                        // Đảm bảo tiến triển tăng dần, thêm một chồng lấn nhỏ để không bỏ sót nội dung
-                        lastStart = Math.Max(lastStart, y + Math.Max(1, currentHeight - 20));
+                        var result = chrome.ExecuteCdpCommand("Page.captureScreenshot", args) as IDictionary<string, object>;
+                        if (result != null && result.TryGetValue("data", out var dataObj) && dataObj is string base64)
+                        {
+                            fullShotBytes = Convert.FromBase64String(base64);
+                            fullOk = fullShotBytes != null && fullShotBytes.Length > 0;
+                        }
                     }
+                    catch { fullOk = false; }
+
+                    if (!fullOk)
+                    {
+                        try
+                        {
+                            var shot = ((ITakesScreenshot)driver).GetScreenshot();
+                            fullShotBytes = shot.AsByteArray;
+                            fullOk = fullShotBytes != null && fullShotBytes.Length > 0;
+                        }
+                        catch { fullOk = false; }
+                    }
+
+                    try { chrome.ExecuteCdpCommand("Emulation.clearDeviceMetricsOverride", new Dictionary<string, object>()); } catch { }
                 }
                 else
                 {
-                    // Fallback: nếu không phải ChromeDriver (CDP), chụp 1 ảnh/scroll (ít chính xác hơn)
+                    // No CDP: best effort viewport screenshot
+                    try
+                    {
+                        try { MaskSmallImages(driver, 120, 80); } catch { }
+                        var shot = ((ITakesScreenshot)driver).GetScreenshot();
+                        fullShotBytes = shot.AsByteArray;
+                        fullOk = fullShotBytes != null && fullShotBytes.Length > 0;
+                    }
+                    catch { fullOk = false; }
+                }
+                if (!fullOk || fullShotBytes == null || fullShotBytes.Length == 0)
+                {
+                    throw new Exception("Failed to capture full page screenshot for slicing.");
+                }
+
+                // 2) Cắt ảnh theo N phần từ fullShotBytes, luôn đảm bảo phần cuối chứa phần còn lại (footer)
+                using (var ms = new MemoryStream(fullShotBytes))
+                using (var fullImg = Image.Load<Rgba32>(ms))
+                {
+                    int sliceHeight = (int)Math.Ceiling(fullImg.Height / (double)segmentCount);
                     for (int i = 0; i < segmentCount; i++)
                     {
-                        int y = i * segmentHeight;
-                        try { js.ExecuteScript("window.scrollTo(0, arguments[0]);", y); } catch { }
-                        Thread.Sleep(350);
-                        var shot = ((ITakesScreenshot)driver).GetScreenshot();
-                        var fileName = $"split{i+1}_{DateTime.Now:yyyyMMdd_HHmmss_fff}_{Guid.NewGuid().ToString("N").Substring(0,6)}.png";
-                        var savePath = Path.Combine(startupPath, "screenshots", hostLabel, fileName);
-                        Directory.CreateDirectory(Path.GetDirectoryName(savePath)!);
-                        shot.SaveAsFile(savePath);
+                        int y = i * sliceHeight;
+                        int currentHeight = Math.Min(sliceHeight, Math.Max(1, fullImg.Height - y));
+                        if (currentHeight <= 0) break;
 
-                        // Gửi ảnh segment sang queue phân tích dưới dạng base64
-                        TryPublishAnalyze(shot.AsByteArray);
+                        using (var seg = fullImg.Clone(ctx => ctx.Crop(new SixLabors.ImageSharp.Rectangle(0, y, fullImg.Width, currentHeight))))
+                        {
+                            var fileName = $"split{i+1}_{DateTime.Now:yyyyMMdd_HHmmss_fff}_{Guid.NewGuid().ToString("N").Substring(0,6)}.jpg";
+                            var savePath = Path.Combine(shotsDir, fileName);
+                            // Nén như cũ (scale 50%)
+                            AdCapture.SaveImageCompressed(seg, savePath, 1.0, jpegQuality);
+
+                            try
+                            {
+                                var compressedBytes = File.ReadAllBytes(savePath);
+                                try { Console.WriteLine($"[Segment] Saved {Path.GetFileName(savePath)} ({compressedBytes.Length} bytes)"); } catch { }
+                                TryPublishAnalyze(compressedBytes);
+                            }
+                            catch { }
+                        }
                     }
                 }
+                try { Console.WriteLine($"[Segment] Done host={hostLabel}"); } catch { }
             }
             catch (Exception ex)
             {
+                try { Console.WriteLine($"[Segment] ERROR {hostLabel}: {ex.Message}"); } catch { }
                 ErrorWriter.WriteLog(LogPath, "SegmentScreenshots", ex.ToString());
             }
         }
 
-        private static void TryPublishAnalyze(byte[] imageBytes)
+        // Đợi các vị trí quảng cáo phổ biến thật sự render (iframe có kích thước/ảnh đã load…) trước khi chụp
+        private static void WaitForAdsLoaded(IWebDriver driver, TimeSpan maxWait)
+        {
+            var js = (IJavaScriptExecutor)driver;
+            var deadline = DateTime.UtcNow + maxWait;
+            int stableRounds = 0;
+            int lastScore = -1;
+            while (DateTime.UtcNow < deadline)
+            {
+                try
+                {
+                    var script = @"
+                        const minW=120, minH=30;
+                        let score = 0;
+                        // iframes likely ads
+                        const iframes = Array.from(document.querySelectorAll('iframe, frame'));
+                        for (const fr of iframes){
+                          const r = fr.getBoundingClientRect();
+                          if (r.width>=minW && r.height>=minH){ score += 2; }
+                          try { if (fr.contentWindow) score += 1; } catch(e) {}
+                        }
+                        // common ad containers
+                        const adSel = '[id*=''ad''],[id*=''ads''],[id*=''advert''],[id*=''banner''],[class*=''ad ''],[class*='' ad''],[class*=''ad-''],[class*=''-ad''],[class*=''ads''],[class*=''advert''],[class*=''banner''],.gpt-ad,.gpt-unit,.gpt-slot,.dfp-ad,.dfp-slot,.ad-slot,.ad-container,.ad-wrapper,.ad__container,.ad__slot,.adsbygoogle,.google-auto-placed,[data-ad],[data-ad-slot],[data-ad-unit],[data-google-query-id],[data-ez-name]';
+                        const candidates = Array.from(document.querySelectorAll(adSel));
+                        for (const el of candidates){
+                          const r = el.getBoundingClientRect();
+                          if (r.width>=minW && r.height>=minH) score += 2;
+                          const img = el.querySelector('img');
+                          if (img && img.complete && img.naturalWidth>0) score += 2;
+                          const ins = el.querySelector('ins');
+                          if (ins && ins.innerHTML && ins.innerHTML.trim().length>20) score += 1;
+                        }
+                        // readyState complete adds stability
+                        if (document.readyState==='complete') score += 1;
+                        return score;";
+                    int score = Convert.ToInt32(js.ExecuteScript(script));
+                    if (score == lastScore) stableRounds++; else { stableRounds = 0; lastScore = score; }
+                    if (score >= 4 && stableRounds >= 2) break; // đủ tín hiệu rằng ads đã render ổn định
+                }
+                catch { }
+                Thread.Sleep(350);
+            }
+        }
+
+        // Phủ lớp trắng lên các ảnh nhỏ trên document gốc (không can thiệp ảnh trong iframe)
+        private static void MaskSmallImages(IWebDriver driver, int minWidth, int minHeight)
+        {
+            var js = (IJavaScriptExecutor)driver;
+            var script = @"
+                (function(){
+                  try {
+                    var overlays = 0;
+                    var imgs = Array.from(document.images || []);
+                    for (var i=0;i<imgs.length;i++){
+                      var img = imgs[i];
+                      var r = img.getBoundingClientRect();
+                      if (r.width>0 && r.height>0 && (r.width < arguments[0] || r.height < arguments[1])){
+                        var ov = document.createElement('div');
+                        ov.style.position = 'fixed';
+                        ov.style.left = r.left + 'px';
+                        ov.style.top = r.top + 'px';
+                        ov.style.width = r.width + 'px';
+                        ov.style.height = r.height + 'px';
+                        ov.style.background = '#fff';
+                        ov.style.zIndex = '2147483647';
+                        ov.style.pointerEvents = 'none';
+                        document.body.appendChild(ov);
+                        overlays++;
+                      }
+                    }
+                    return overlays;
+                  } catch(e){ return -1; }
+                })();
+            ";
+            try { js.ExecuteScript(script, minWidth, minHeight); } catch { }
+        }
+
+        public static void TryPublishAnalyze(byte[] imageBytes)
         {
             try
             {
@@ -639,9 +698,8 @@ namespace ConsummerScreenPageBot
                 EnsureAnalyzePublisherReady();
                 if (analyzeChannel == null) return;
 
-                var base64 = Convert.ToBase64String(imageBytes);
-                var payload = $"{{ \"screenshot_base64\": \"{base64}\" }}";
-                var body = Encoding.UTF8.GetBytes(payload);
+                var snapshot = lastJobParams; // tránh race
+                var body = AnalyzePayloadBuilder.BuildAnalyzeBody(imageBytes, snapshot, analyze_publish_raw);
 
                 var props = analyzeChannel.CreateBasicProperties();
                 props.Persistent = true;
@@ -650,6 +708,7 @@ namespace ConsummerScreenPageBot
                                             routingKey: RabbitQueueAnalyze,
                                             basicProperties: props,
                                             body: body);
+                try { Console.WriteLine($"[Analyze] Published {(analyze_publish_raw=="1"?imageBytes.Length:body.Length)} bytes to queue '{RabbitQueueAnalyze}' (raw={analyze_publish_raw})"); } catch { }
             }
             catch (Exception ex)
             {
@@ -846,7 +905,7 @@ namespace ConsummerScreenPageBot
             return Math.Max(minY, Math.Max(0, Math.Min(bestY, totalHeight - viewportHeight)));
         }
 
-        private static void HandleThanhNien(IWebDriver driver)
+        private static void HandleThanhNien(IWebDriver driver, long jpegQuality)
         {
             var wait = new WebDriverWait(new SystemClock(), driver, TimeSpan.FromSeconds(15), TimeSpan.FromMilliseconds(250));
             try
@@ -866,11 +925,11 @@ namespace ConsummerScreenPageBot
                 ".qc, .quangcao"
             };
             var selectors = AdCapture.GetCommonAdSelectors().Concat(siteSpecific).ToArray();
-            AdCapture.CaptureBySelectors(driver, selectors, "thanhnien.vn", startupPath, LogPath);
-            AdCapture.CaptureAdIframes(driver, "thanhnien.vn", startupPath, LogPath);
+            AdCapture.CaptureBySelectors(driver, selectors, "thanhnien.vn", startupPath, LogPath, jpegQuality);
+            AdCapture.CaptureAdIframes(driver, "thanhnien.vn", startupPath, LogPath, jpegQuality);
         }
 
-        private static void CaptureGenericBanners(IWebDriver driver, string hostLabel)
+        private static void CaptureGenericBanners(IWebDriver driver, string hostLabel, long jpegQuality)
         {
             // Đảm bảo khu vực top ads sẵn sàng trên các trang khác
             EnsureTopAdsNearTop(driver, TimeSpan.FromSeconds(6));
@@ -883,15 +942,15 @@ namespace ConsummerScreenPageBot
             };
             var selectors = AdCapture.GetCommonAdSelectors().Concat(siteSpecific).ToArray();
             // Chụp các phần tử quảng cáo trong DOM chính
-            AdCapture.CaptureBySelectors(driver, selectors, hostLabel, startupPath, LogPath);
+            AdCapture.CaptureBySelectors(driver, selectors, hostLabel, startupPath, LogPath, jpegQuality);
             // Chụp trực tiếp các iframe
-            AdCapture.CaptureAdIframes(driver, hostLabel, startupPath, LogPath);
+            AdCapture.CaptureAdIframes(driver, hostLabel, startupPath, LogPath, jpegQuality);
         }
 
-        // Wrapper giữ tương thích cũ, ủy thác sang Utils/AdCapture
-        private static void CaptureBySelectors(IWebDriver driver, string[] selectors, string hostLabel)
+        // Wrapper giữ tương thích cũ, ủy thác sang Utils/AdCapture (thêm jpegQuality)
+        private static void CaptureBySelectors(IWebDriver driver, string[] selectors, string hostLabel, long jpegQuality)
         {
-            AdCapture.CaptureBySelectors(driver, selectors, hostLabel, startupPath, LogPath);
+            AdCapture.CaptureBySelectors(driver, selectors, hostLabel, startupPath, LogPath, jpegQuality);
         }
 
         // (moved to Utils/AdCapture.cs)
@@ -981,26 +1040,61 @@ namespace ConsummerScreenPageBot
         {
             try
             {
-                // Common install locations
-                var candidates = new[]
+                // macOS paths
+                if (OperatingSystem.IsMacOS())
                 {
-                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Google\\Chrome\\Application\\chrome.exe"),
-                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Google\\Chrome\\Application\\chrome.exe"),
-                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Google\\Chrome\\Application\\chrome.exe"),
-                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Chromium\\Application\\chrome.exe"),
-                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Chromium\\Application\\chrome.exe")
-                };
-                foreach (var p in candidates)
-                {
-                    if (File.Exists(p)) return p;
+                    var macCandidates = new[]
+                    {
+                        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                        "/Applications/Chromium.app/Contents/MacOS/Chromium"
+                    };
+                    foreach (var p in macCandidates)
+                    {
+                        if (File.Exists(p)) return p;
+                    }
+                    return string.Empty;
                 }
 
-                // Registry lookup
-                string[] hives = { "HKEY_LOCAL_MACHINE", "HKEY_CURRENT_USER" };
-                foreach (var hive in hives)
+                // Linux paths
+                if (OperatingSystem.IsLinux())
                 {
-                    var path = Registry.GetValue($"{hive}\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe", "", null) as string;
-                    if (!string.IsNullOrWhiteSpace(path) && File.Exists(path)) return path;
+                    var linuxCandidates = new[]
+                    {
+                        "/usr/bin/google-chrome",
+                        "/usr/bin/google-chrome-stable",
+                        "/usr/bin/chromium",
+                        "/usr/bin/chromium-browser"
+                    };
+                    foreach (var p in linuxCandidates)
+                    {
+                        if (File.Exists(p)) return p;
+                    }
+                    return string.Empty;
+                }
+
+                // Windows paths
+                if (OperatingSystem.IsWindows())
+                {
+                    var windowsCandidates = new[]
+                    {
+                        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Google\\Chrome\\Application\\chrome.exe"),
+                        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Google\\Chrome\\Application\\chrome.exe"),
+                        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Google\\Chrome\\Application\\chrome.exe"),
+                        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Chromium\\Application\\chrome.exe"),
+                        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Chromium\\Application\\chrome.exe")
+                    };
+                    foreach (var p in windowsCandidates)
+                    {
+                        if (File.Exists(p)) return p;
+                    }
+
+                    // Registry lookup for Windows
+                    string[] hives = { "HKEY_LOCAL_MACHINE", "HKEY_CURRENT_USER" };
+                    foreach (var hive in hives)
+                    {
+                        var path = Registry.GetValue($"{hive}\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe", "", null) as string;
+                        if (!string.IsNullOrWhiteSpace(path) && File.Exists(path)) return path;
+                    }
                 }
             }
             catch { }
