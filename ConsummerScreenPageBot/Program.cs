@@ -2,7 +2,6 @@
 // git add .
 // git commit -m "update code mới"
 // git push origin main
-
 using Newtonsoft.Json.Linq;
 using OpenQA.Selenium.Chrome;
 using OpenQA.Selenium;
