@@ -9,6 +9,7 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using SixLabors.ImageSharp.Formats.Jpeg;
+using ConsummerScreenPageBot.Utils;
 
 namespace ConsummerScreenPageBot
 {
@@ -35,6 +36,7 @@ namespace ConsummerScreenPageBot
 			catch (Exception ex)
 			{
 				ErrorWriter.WriteLog("logs", "SaveImageCompressed", ex.ToString());
+				TelegramService.PushLogToTelegram("AdCapture: SaveImageCompressed Error", ex);
 			}
 		}
 
@@ -66,6 +68,7 @@ namespace ConsummerScreenPageBot
 			catch (Exception ex)
 			{
 				ErrorWriter.WriteLog("logs", "SaveJpegCompressedFromBytes", ex.ToString());
+				TelegramService.PushLogToTelegram("AdCapture: SaveJpegCompressedFromBytes Error", ex);
 			}
 		}
 
@@ -131,6 +134,7 @@ namespace ConsummerScreenPageBot
                         catch (Exception inner)
                         {
                             ErrorWriter.WriteLog(logPath, "CaptureElement", inner.ToString());
+                            TelegramService.PushLogToTelegram($"AdCapture: CaptureElement Error - {hostLabel}", inner);
                         }
                     }
                 }
@@ -138,6 +142,7 @@ namespace ConsummerScreenPageBot
                 catch (Exception ex)
                 {
                     ErrorWriter.WriteLog(logPath, "QuerySelector", ex.ToString());
+                    TelegramService.PushLogToTelegram($"AdCapture: QuerySelector Error - {hostLabel}", ex);
                 }
             }
             Console.WriteLine($"Saved {saved} banner screenshots for {hostLabel}");
@@ -186,12 +191,14 @@ namespace ConsummerScreenPageBot
                     catch (Exception ex)
                     {
                         ErrorWriter.WriteLog(logPath, "CaptureAdIframes", ex.ToString());
+                        TelegramService.PushLogToTelegram($"AdCapture: CaptureAdIframes Error - {hostLabel}", ex);
                     }
                 }
             }
             catch (Exception ex)
             {
                 ErrorWriter.WriteLog(logPath, "CaptureAdIframes.Root", ex.ToString());
+                TelegramService.PushLogToTelegram($"AdCapture: CaptureAdIframes.Root Error - {hostLabel}", ex);
             }
         }
 
@@ -242,6 +249,7 @@ namespace ConsummerScreenPageBot
             catch (Exception ex)
             {
                 ErrorWriter.WriteLog(logPath, "SaveScreenshot", ex.ToString());
+                TelegramService.PushLogToTelegram($"AdCapture: SaveScreenshot Error - {hostLabel}", ex);
             }
         }
 

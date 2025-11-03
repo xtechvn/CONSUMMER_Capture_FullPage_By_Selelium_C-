@@ -1,0 +1,132 @@
+[2025-11-02 21:07:39] [SetupMobileDevice] OpenQA.Selenium.WebDriverException: An unknown exception was encountered sending an HTTP request to the remote WebDriver server for URL http://localhost:51076/session/2d9ce5df131800e22b1483d88da1ca43/goog/cdp/execute. The exception message was: An error occurred while sending the request.
+ ---> System.Net.Http.HttpRequestException: An error occurred while sending the request.
+ ---> System.IO.IOException: Unable to read data from the transport connection: An existing connection was forcibly closed by the remote host..
+ ---> System.Net.Sockets.SocketException (10054): An existing connection was forcibly closed by the remote host.
+   --- End of inner exception stack trace ---
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource<System.Int32>.GetResult(Int16 token)
+   at System.Net.Http.HttpConnection.InitialFillAsync(Boolean async)
+   at System.Net.Http.HttpConnection.SendAsync(HttpRequestMessage request, Boolean async, CancellationToken cancellationToken)
+   --- End of inner exception stack trace ---
+   at System.Net.Http.HttpConnection.SendAsync(HttpRequestMessage request, Boolean async, CancellationToken cancellationToken)
+   at System.Net.Http.HttpConnectionPool.SendWithVersionDetectionAndRetryAsync(HttpRequestMessage request, Boolean async, Boolean doRequestAuth, CancellationToken cancellationToken)
+   at System.Net.Http.RedirectHandler.SendAsync(HttpRequestMessage request, Boolean async, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at OpenQA.Selenium.Remote.HttpCommandExecutor.MakeHttpRequest(HttpRequestInfo requestInfo)
+   at OpenQA.Selenium.Remote.HttpCommandExecutor.<>c__DisplayClass32_0.<<Execute>b__0>d.MoveNext()
+--- End of stack trace from previous location ---
+   at OpenQA.Selenium.Remote.HttpCommandExecutor.Execute(Command commandToExecute)
+   --- End of inner exception stack trace ---
+   at OpenQA.Selenium.Remote.HttpCommandExecutor.Execute(Command commandToExecute)
+   at OpenQA.Selenium.Remote.DriverServiceCommandExecutor.Execute(Command commandToExecute)
+   at OpenQA.Selenium.WebDriver.Execute(String driverCommandToExecute, Dictionary`2 parameters)
+   at OpenQA.Selenium.Chromium.ChromiumDriver.ExecuteCdpCommand(String commandName, Dictionary`2 commandParameters)
+   at ConsummerScreenPageBot.Program.SetupMobileDevice(IWebDriver driver) in F:\PROJECT\CAPTURE_FULL_PAGE_C#_SELELIUM\CONSUM_SCREEN_PAGE_BY_SE_C__GIT\CONSUMMER_Capture_FullPage_By_Selelium_C-\ConsummerScreenPageBot\Program.cs:line 368
+[2025-11-02 21:08:52] [ProcessDevice] 2 - https://vnexpress.net/ => OpenQA.Selenium.WebDriverException: An unknown exception was encountered sending an HTTP request to the remote WebDriver server for URL http://localhost:51076/session/2d9ce5df131800e22b1483d88da1ca43/url. The exception message was: No connection could be made because the target machine actively refused it. (localhost:51076)
+ ---> System.Net.Http.HttpRequestException: No connection could be made because the target machine actively refused it. (localhost:51076)
+ ---> System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it.
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)
+   at System.Net.Sockets.Socket.<ConnectAsync>g__WaitForConnectWithCancellation|285_0(AwaitableSocketAsyncEventArgs saea, ValueTask connectTask, CancellationToken cancellationToken)
+   at System.Net.Http.HttpConnectionPool.ConnectToTcpHostAsync(String host, Int32 port, HttpRequestMessage initialRequest, Boolean async, CancellationToken cancellationToken)
+   --- End of inner exception stack trace ---
+   at System.Net.Http.HttpConnectionPool.ConnectToTcpHostAsync(String host, Int32 port, HttpRequestMessage initialRequest, Boolean async, CancellationToken cancellationToken)
+   at System.Net.Http.HttpConnectionPool.ConnectAsync(HttpRequestMessage request, Boolean async, CancellationToken cancellationToken)
+   at System.Net.Http.HttpConnectionPool.CreateHttp11ConnectionAsync(HttpRequestMessage request, Boolean async, CancellationToken cancellationToken)
+   at System.Net.Http.HttpConnectionPool.AddHttp11ConnectionAsync(QueueItem queueItem)
+   at System.Threading.Tasks.TaskCompletionSourceWithCancellation`1.WaitWithCancellationAsync(CancellationToken cancellationToken)
+   at System.Net.Http.HttpConnectionPool.SendWithVersionDetectionAndRetryAsync(HttpRequestMessage request, Boolean async, Boolean doRequestAuth, CancellationToken cancellationToken)
+   at System.Net.Http.RedirectHandler.SendAsync(HttpRequestMessage request, Boolean async, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at OpenQA.Selenium.Remote.HttpCommandExecutor.MakeHttpRequest(HttpRequestInfo requestInfo)
+   at OpenQA.Selenium.Remote.HttpCommandExecutor.<>c__DisplayClass32_0.<<Execute>b__0>d.MoveNext()
+--- End of stack trace from previous location ---
+   at OpenQA.Selenium.Remote.HttpCommandExecutor.Execute(Command commandToExecute)
+   --- End of inner exception stack trace ---
+   at OpenQA.Selenium.Remote.HttpCommandExecutor.Execute(Command commandToExecute)
+   at OpenQA.Selenium.Remote.DriverServiceCommandExecutor.Execute(Command commandToExecute)
+   at OpenQA.Selenium.WebDriver.Execute(String driverCommandToExecute, Dictionary`2 parameters)
+   at OpenQA.Selenium.WebDriver.get_Url()
+   at ConsummerScreenPageBot.Program.TryNavigate(IWebDriver driver, String url, TimeSpan timeout, String& failureReason) in F:\PROJECT\CAPTURE_FULL_PAGE_C#_SELELIUM\CONSUM_SCREEN_PAGE_BY_SE_C__GIT\CONSUMMER_Capture_FullPage_By_Selelium_C-\ConsummerScreenPageBot\Program.cs:line 1574
+   at ConsummerScreenPageBot.Program.<>c__DisplayClass17_1.<Main>b__0(Object sender, BasicDeliverEventArgs ea) in F:\PROJECT\CAPTURE_FULL_PAGE_C#_SELELIUM\CONSUM_SCREEN_PAGE_BY_SE_C__GIT\CONSUMMER_Capture_FullPage_By_Selelium_C-\ConsummerScreenPageBot\Program.cs:line 259
+[2025-11-02 21:10:40] [SetupMobileDevice] OpenQA.Selenium.WebDriverException: An unknown exception was encountered sending an HTTP request to the remote WebDriver server for URL http://localhost:51076/session/2d9ce5df131800e22b1483d88da1ca43/goog/cdp/execute. The exception message was: No connection could be made because the target machine actively refused it. (localhost:51076)
+ ---> System.Net.Http.HttpRequestException: No connection could be made because the target machine actively refused it. (localhost:51076)
+ ---> System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it.
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)
+   at System.Net.Sockets.Socket.<ConnectAsync>g__WaitForConnectWithCancellation|285_0(AwaitableSocketAsyncEventArgs saea, ValueTask connectTask, CancellationToken cancellationToken)
+   at System.Net.Http.HttpConnectionPool.ConnectToTcpHostAsync(String host, Int32 port, HttpRequestMessage initialRequest, Boolean async, CancellationToken cancellationToken)
+   --- End of inner exception stack trace ---
+   at System.Net.Http.HttpConnectionPool.ConnectToTcpHostAsync(String host, Int32 port, HttpRequestMessage initialRequest, Boolean async, CancellationToken cancellationToken)
+   at System.Net.Http.HttpConnectionPool.ConnectAsync(HttpRequestMessage request, Boolean async, CancellationToken cancellationToken)
+   at System.Net.Http.HttpConnectionPool.CreateHttp11ConnectionAsync(HttpRequestMessage request, Boolean async, CancellationToken cancellationToken)
+   at System.Net.Http.HttpConnectionPool.AddHttp11ConnectionAsync(QueueItem queueItem)
+   at System.Threading.Tasks.TaskCompletionSourceWithCancellation`1.WaitWithCancellationAsync(CancellationToken cancellationToken)
+   at System.Net.Http.HttpConnectionPool.SendWithVersionDetectionAndRetryAsync(HttpRequestMessage request, Boolean async, Boolean doRequestAuth, CancellationToken cancellationToken)
+   at System.Net.Http.RedirectHandler.SendAsync(HttpRequestMessage request, Boolean async, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at OpenQA.Selenium.Remote.HttpCommandExecutor.MakeHttpRequest(HttpRequestInfo requestInfo)
+   at OpenQA.Selenium.Remote.HttpCommandExecutor.<>c__DisplayClass32_0.<<Execute>b__0>d.MoveNext()
+--- End of stack trace from previous location ---
+   at OpenQA.Selenium.Remote.HttpCommandExecutor.Execute(Command commandToExecute)
+   --- End of inner exception stack trace ---
+   at OpenQA.Selenium.Remote.HttpCommandExecutor.Execute(Command commandToExecute)
+   at OpenQA.Selenium.Remote.DriverServiceCommandExecutor.Execute(Command commandToExecute)
+   at OpenQA.Selenium.WebDriver.Execute(String driverCommandToExecute, Dictionary`2 parameters)
+   at OpenQA.Selenium.Chromium.ChromiumDriver.ExecuteCdpCommand(String commandName, Dictionary`2 commandParameters)
+   at ConsummerScreenPageBot.Program.SetupMobileDevice(IWebDriver driver) in F:\PROJECT\CAPTURE_FULL_PAGE_C#_SELELIUM\CONSUM_SCREEN_PAGE_BY_SE_C__GIT\CONSUMMER_Capture_FullPage_By_Selelium_C-\ConsummerScreenPageBot\Program.cs:line 368
+[2025-11-02 21:11:52] [ProcessDevice] 2 - https://vnexpress.net/ => OpenQA.Selenium.WebDriverException: An unknown exception was encountered sending an HTTP request to the remote WebDriver server for URL http://localhost:51076/session/2d9ce5df131800e22b1483d88da1ca43/url. The exception message was: No connection could be made because the target machine actively refused it. (localhost:51076)
+ ---> System.Net.Http.HttpRequestException: No connection could be made because the target machine actively refused it. (localhost:51076)
+ ---> System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it.
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)
+   at System.Net.Sockets.Socket.<ConnectAsync>g__WaitForConnectWithCancellation|285_0(AwaitableSocketAsyncEventArgs saea, ValueTask connectTask, CancellationToken cancellationToken)
+   at System.Net.Http.HttpConnectionPool.ConnectToTcpHostAsync(String host, Int32 port, HttpRequestMessage initialRequest, Boolean async, CancellationToken cancellationToken)
+   --- End of inner exception stack trace ---
+   at System.Net.Http.HttpConnectionPool.ConnectToTcpHostAsync(String host, Int32 port, HttpRequestMessage initialRequest, Boolean async, CancellationToken cancellationToken)
+   at System.Net.Http.HttpConnectionPool.ConnectAsync(HttpRequestMessage request, Boolean async, CancellationToken cancellationToken)
+   at System.Net.Http.HttpConnectionPool.CreateHttp11ConnectionAsync(HttpRequestMessage request, Boolean async, CancellationToken cancellationToken)
+   at System.Net.Http.HttpConnectionPool.AddHttp11ConnectionAsync(QueueItem queueItem)
+   at System.Threading.Tasks.TaskCompletionSourceWithCancellation`1.WaitWithCancellationAsync(CancellationToken cancellationToken)
+   at System.Net.Http.HttpConnectionPool.SendWithVersionDetectionAndRetryAsync(HttpRequestMessage request, Boolean async, Boolean doRequestAuth, CancellationToken cancellationToken)
+   at System.Net.Http.RedirectHandler.SendAsync(HttpRequestMessage request, Boolean async, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at OpenQA.Selenium.Remote.HttpCommandExecutor.MakeHttpRequest(HttpRequestInfo requestInfo)
+   at OpenQA.Selenium.Remote.HttpCommandExecutor.<>c__DisplayClass32_0.<<Execute>b__0>d.MoveNext()
+--- End of stack trace from previous location ---
+   at OpenQA.Selenium.Remote.HttpCommandExecutor.Execute(Command commandToExecute)
+   --- End of inner exception stack trace ---
+   at OpenQA.Selenium.Remote.HttpCommandExecutor.Execute(Command commandToExecute)
+   at OpenQA.Selenium.Remote.DriverServiceCommandExecutor.Execute(Command commandToExecute)
+   at OpenQA.Selenium.WebDriver.Execute(String driverCommandToExecute, Dictionary`2 parameters)
+   at OpenQA.Selenium.WebDriver.get_Url()
+   at ConsummerScreenPageBot.Program.TryNavigate(IWebDriver driver, String url, TimeSpan timeout, String& failureReason) in F:\PROJECT\CAPTURE_FULL_PAGE_C#_SELELIUM\CONSUM_SCREEN_PAGE_BY_SE_C__GIT\CONSUMMER_Capture_FullPage_By_Selelium_C-\ConsummerScreenPageBot\Program.cs:line 1574
+   at ConsummerScreenPageBot.Program.<>c__DisplayClass17_1.<Main>b__0(Object sender, BasicDeliverEventArgs ea) in F:\PROJECT\CAPTURE_FULL_PAGE_C#_SELELIUM\CONSUM_SCREEN_PAGE_BY_SE_C__GIT\CONSUMMER_Capture_FullPage_By_Selelium_C-\ConsummerScreenPageBot\Program.cs:line 259
+[2025-11-02 22:42:57] [Handle Error] RabbitMQ.Client.Exceptions.BrokerUnreachableException: None of the specified endpoints were reachable
+ ---> System.AggregateException: One or more errors occurred. (Connection failed)
+ ---> RabbitMQ.Client.Exceptions.ConnectFailureException: Connection failed
+ ---> System.Net.Sockets.SocketException (10060): A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)
+   at System.Threading.Tasks.ValueTask.ValueTaskSourceAsTask.<>c.<.cctor>b__4_0(Object state)
+--- End of stack trace from previous location ---
+   at RabbitMQ.Client.TcpClientAdapter.ConnectAsync(String host, Int32 port)
+   at RabbitMQ.Client.Impl.TaskExtensions.TimeoutAfter(Task task, TimeSpan timeout)
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)
+   --- End of inner exception stack trace ---
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingAddressFamily(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout, AddressFamily family)
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingIPv4(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout)
+   at RabbitMQ.Client.Impl.SocketFrameHandler..ctor(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)
+   at RabbitMQ.Client.Framing.Impl.IProtocolExtensions.CreateFrameHandler(IProtocol protocol, AmqpTcpEndpoint endpoint, ArrayPool`1 pool, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)
+   at RabbitMQ.Client.ConnectionFactory.CreateFrameHandler(AmqpTcpEndpoint endpoint)
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)
+   --- End of inner exception stack trace ---
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)
+   at RabbitMQ.Client.Framing.Impl.AutorecoveringConnection.Init(IEndpointResolver endpoints)
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)
+   --- End of inner exception stack trace ---
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(String clientProvidedName)
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection()
+   at ConsummerScreenPageBot.Program.Main(String[] args) in F:\PROJECT\CAPTURE_FULL_PAGE_C#_SELELIUM\CONSUM_SCREEN_PAGE_BY_SE_C__GIT\CONSUMMER_Capture_FullPage_By_Selelium_C-\ConsummerScreenPageBot\Program.cs:line 179

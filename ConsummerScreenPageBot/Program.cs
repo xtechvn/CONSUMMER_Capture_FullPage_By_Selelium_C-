@@ -8,23 +8,15 @@ using OpenQA.Selenium;
 using OpenQA.Selenium.Support.UI;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
-using System;
 using System.Configuration;
-using System.Diagnostics;
-using System.IO;
 using System.Text;
-using System.Linq;
 using Microsoft.Win32;
-using System.Threading;
-using System.Collections.Generic;
-using System.Net.Sockets;
-using System.Net;
-using Newtonsoft.Json;
 using ConsummerScreenPageBot.Models;
+using ConsummerScreenPageBot.Utils;
+using ConsummerScreenPageBot.Device;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
-using SixLabors.ImageSharp.Formats.Jpeg;
 
 namespace ConsummerScreenPageBot
 {
@@ -51,6 +43,26 @@ namespace ConsummerScreenPageBot
         private static IModel? analyzeChannel;
         private static JObject? lastJobParams;
 
+        /// <summary>
+        /// Hàm chính khởi động ứng dụng
+        /// 
+        /// Cách thức hoạt động:
+        /// 1. Thiết lập encoding UTF-8 cho console để hiển thị tiếng Việt đúng
+        /// 2. Tìm đường dẫn Chrome binary tự động trên Windows/Linux/MacOS
+        /// 3. Cấu hình ChromeOptions:
+        ///    - Nếu headless mode: thiết lập các tham số cho server/docker (no-sandbox, disable-gpu, ...)
+        ///    - Nếu không headless: mở Chrome full màn hình
+        ///    - Tạo user profile riêng để tránh xung đột
+        ///    - Thêm các tham số chống phát hiện automation
+        /// 4. Khởi tạo ChromeDriver với logging chi tiết
+        /// 5. Kết nối tới RabbitMQ queue để lắng nghe các job chụp ảnh website
+        /// 6. Khi nhận được message từ queue:
+        ///    - Parse JSON để lấy link_web, số lượng segment, chất lượng ảnh
+        ///    - Điều hướng tới URL bằng TryNavigate
+        ///    - Xử lý website bằng ProcessWebsite để chụp ảnh
+        ///    - Gửi ảnh đã chụp lên queue analyze để AI xử lý
+        /// 7. Giữ tiến trình luôn chạy để tiếp tục nhận job mới
+        /// </summary>
         static void Main(string[] args)
         {
             try
@@ -151,9 +163,9 @@ namespace ConsummerScreenPageBot
                             VirtualHost = string.IsNullOrWhiteSpace(rabbit_vhost) ? "/" : rabbit_vhost,
                             Port = rabbit_port,
                             AutomaticRecoveryEnabled = true,
-                            NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
-                            RequestedConnectionTimeout = TimeSpan.FromSeconds(30),
-                            RequestedHeartbeat = TimeSpan.FromSeconds(30)
+                            NetworkRecoveryInterval = TimeSpan.FromSeconds(5),    // Nếu mất kết nối RabbitMQ, thử kết nối lại sau mỗi 5 giây
+                            //RequestedConnectionTimeout = TimeSpan.FromSeconds(30), // Thời gian timeout tối đa khi chờ thiết lập kết nối là 30 giây
+                            RequestedHeartbeat = TimeSpan.FromSeconds(30)          // Gửi tín hiệu heartbeat tới RabbitMQ mỗi 30 giây để kiểm tra kết nối còn sống
                         };
                         if (rabbit_use_ssl == "1" || rabbit_port == 5671)
                         {
@@ -192,28 +204,90 @@ namespace ConsummerScreenPageBot
                                     string siteUrl = "";
                                     int segment_page = 10;
                                     var jobj = JObject.Parse(message);
+
+                                    // Link web can chup
                                     siteUrl = jobj["link_web"]?.ToString() ?? "";
-                                    segment_page = jobj["slice"] != null ? jobj["slice"].ToObject<int>() : 10;
+
+                                    // So luong segment chia trang de gui cho GEMINI phan tich hinh anh
+                                    segment_page = jobj["slice"] != null ? jobj["slice"].ToObject<int>() : 5;
+
+                                    // Chat luong anh xuat ra de OCR GEMINI phan tich hinh anh
                                     long jpegQuality = jobj["quanlity_image"] != null ? jobj["quanlity_image"].ToObject<long>() : 70;
+
+                                    // Day la so lan chup. sau khi refresh trang se tinh la 1 lan chup
+                                    int retry_screen_page = jobj["retry_screen_page"] != null ? jobj["retry_screen_page"].ToObject<int>() : 1;
+
+                                    // Device: 1:PC, 2:Mobile (có thể là "1", "2", hoặc "1,2")
+                                    string device = jobj["device"] != null ? jobj["device"].ToObject<string>() : "1";
+                                    
                                     // Lưu context params để gộp vào payload RabbitQueueAnalyze
-                                    try { lastJobParams = (JObject)jobj.DeepClone(); } catch { lastJobParams = jobj; }
+                                    try { 
+                                        lastJobParams = (JObject)jobj.DeepClone(); 
+                                    } catch {
+                                         lastJobParams = jobj; 
+                                    }
                                    
                                     
                                     try
                                     {                                        
-                                        Console.WriteLine("Navigate: " + siteUrl);
-                                        if (!TryNavigate(browers, siteUrl, TimeSpan.FromSeconds(60), out var failReason))
+                                        // Parse device parameter: có thể là "1", "2", hoặc "1,2"
+                                        var deviceList = device.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                                        
+                                        foreach (var dev in deviceList)
                                         {
-                                            Console.WriteLine($"Navigation failed: {failReason}");
-                                            ErrorWriter.WriteLog(LogPath, "NavigateFail", $"{siteUrl} => {failReason}");
-                                            
+                                            var deviceType = dev.Trim();
+                                            try
+                                            {
+                                                Console.WriteLine($"Processing device type: {deviceType} for {siteUrl}");
+                                                
+                                                // Setup ChromeOptions cho device type
+                                                IWebDriver driver = browers;
+                                                bool needMobileSetup = deviceType == "2";
+                                                
+                                                if (needMobileSetup)
+                                                {
+                                                    // Setup mobile device emulation
+                                                    SetupMobileDevice(browers);
+                                                }
+                                                else
+                                                {
+                                                    // Setup desktop (hoặc giữ nguyên nếu đã là desktop)
+                                                    SetupDesktopDevice(browers);
+                                                }
+                                                
+                                                Console.WriteLine("Navigate: " + siteUrl);
+                                                if (!TryNavigate(browers, siteUrl, TimeSpan.FromSeconds(60), out var failReason))
+                                                {
+                                                    Console.WriteLine($"Navigation failed: {failReason}");
+                                                    ErrorWriter.WriteLog(LogPath, "NavigateFail", $"{deviceType} - {siteUrl} => {failReason}");
+                                                    continue;
+                                                }
+                                                
+                                                // Gọi đúng class dựa trên device type
+                                                if (deviceType == "2")
+                                                {
+                                                    // Mobile
+                                                    ScreenMobile.ProcessWebsite(browers, siteUrl, segment_page, jpegQuality);
+                                                }
+                                                else
+                                                {
+                                                    // Desktop (mặc định)
+                                                    ScreenDesktop.ProcessWebsite(browers, siteUrl, segment_page, jpegQuality);
+                                                }
+                                            }
+                                            catch (Exception devEx)
+                                            {
+                                                Console.WriteLine($"Error processing device {deviceType} for {siteUrl}: {devEx.Message}");
+                                                ErrorWriter.WriteLog(LogPath, "ProcessDevice", $"{deviceType} - {siteUrl} => {devEx}");
+                                                TelegramService.PushLogToTelegram($"Error processing device {deviceType} for website: {siteUrl}", devEx);
+                                            }
                                         }
-                                        ProcessWebsite(browers, siteUrl, segment_page, jpegQuality);
                                     }
                                     catch (Exception siteEx)
                                     {
                                         Console.WriteLine($"Error processing {siteUrl}: {siteEx.Message}");
                                         ErrorWriter.WriteLog(LogPath, "ProcessWebsite", $"{siteUrl} => {siteEx}");
+                                        TelegramService.PushLogToTelegram($"Error processing website: {siteUrl}", siteEx);
                                     }
                                     
 
@@ -223,6 +297,7 @@ namespace ConsummerScreenPageBot
                                 {
                                     Console.WriteLine("error queue: " + ex.ToString());
                                     ErrorWriter.WriteLog(LogPath, "QueueError", ex.ToString());
+                                    TelegramService.PushLogToTelegram("Queue Error occurred", ex);
                                 }
                             };
 
@@ -246,82 +321,126 @@ namespace ConsummerScreenPageBot
                 }
                 catch (WebDriverException wdEx)
                 {
-                    Console.WriteLine("WebDriverException: " + wdEx.Message);
-                    // Main required edit: Specific message for this error code
-                    if (wdEx.Message != null && wdEx.Message.Contains("session not created: Chrome instance exited.", StringComparison.OrdinalIgnoreCase))
-                    {
-                        Console.WriteLine("session not created: Chrome instance exited. Examine ChromeDriver verbose log to determine the cause. (SessionNotCreated)");
-                        Console.WriteLine($"See verbose ChromeDriver log at: {Path.Combine(LogPath, "chromedriver.log")}");
-                    }
-                    else
-                    {
-                        Console.WriteLine("Possible cause: Chrome or ChromeDriver version mismatch, Chrome not installed, or missing dependencies on server (libgbm, libX11, ...).");
-                    }
-
+                    Console.WriteLine("WebDriverException: " + wdEx.Message);  
                     ErrorWriter.WriteLog(LogPath, "SessionNotCreated", wdEx.ToString());
-
-                    if (!string.IsNullOrEmpty(chrome_option.BinaryLocation))
-                    {
-                        Console.WriteLine("Using detected Chrome binary: " + chrome_option.BinaryLocation);
-                    }
-                    else
-                    {
-                        Console.WriteLine("No Chrome binary detected! Try specifying an absolute path or installing Chrome browser.");
-                    }
+                    TelegramService.PushLogToTelegram("WebDriverException: Session Not Created", wdEx);
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine("Error: " + ex.ToString());
                     ErrorWriter.WriteLog(LogPath, "Handle Error", ex.ToString());
+                    TelegramService.PushLogToTelegram("Handle Error occurred", ex);
                 }
             }
             catch (Exception ex)
             {
                 Console.WriteLine("Error (outer): " + ex.ToString());
                 ErrorWriter.WriteLog(LogPath, "Handle Error(outer)", ex.ToString());
+                TelegramService.PushLogToTelegram("Handle Error (outer) occurred", ex);
             }
         }
 
-        private static void ProcessWebsite(IWebDriver driver, string url,int segment_page = 10, long jpegQuality = 80)
+        /// <summary>
+        /// Setup Chrome để giả lập Mobile device
+        /// 
+        /// Cách thức hoạt động:
+        /// 1. Sử dụng Chrome DevTools Protocol để thiết lập mobile device emulation
+        /// 2. Đặt viewport thành 375x667 (iPhone 12/13)
+        /// 3. Đặt mobile = true, deviceScaleFactor = 2 (retina display)
+        /// 4. Đặt User Agent Mobile (iPhone)
+        /// </summary>
+        private static void SetupMobileDevice(IWebDriver driver)
         {
-            string host;
             try
             {
-                host = new Uri(url).Host.ToLowerInvariant();
+                var chrome = driver as ChromeDriver;
+                if (chrome != null)
+                {
+                    // Mobile device metrics
+                    var metrics = new Dictionary<string, object>
+                    {
+                        { "mobile", true },
+                        { "width", 375 },
+                        { "height", 667 },
+                        { "deviceScaleFactor", 2 },
+                        { "scale", 1 }
+                    };
+                    chrome.ExecuteCdpCommand("Emulation.setDeviceMetricsOverride", metrics);
+
+                    // Mobile User Agent (iPhone)
+                    var userAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1";
+                    chrome.ExecuteCdpCommand("Network.setUserAgentOverride", new Dictionary<string, object>
+                    {
+                        { "userAgent", userAgent }
+                    });
+
+                    Console.WriteLine("[Mobile] Device emulation setup completed");
+                }
             }
-            catch
+            catch (Exception ex)
             {
-                host = url.ToLowerInvariant();
+                Console.WriteLine($"Error setting up mobile device: {ex.Message}");
+                ErrorWriter.WriteLog(LogPath, "SetupMobileDevice", ex.ToString());
             }
-
-            // Xóa toàn bộ ảnh cũ trong thư mục của site trước khi chụp lại
-            ClearHostScreenshots(host);
-
-            // Cuộn xuống cuối trang để kích hoạt lazy-load (quảng cáo/thành phần chậm) trước khi dò tìm
-            ScrollToBottomAndEnsureLazyContent(driver, TimeSpan.FromSeconds(12));
-            TryProbeAdCandidates(driver, TimeSpan.FromSeconds(3));
-
-            // switch (host)
-            // {
-            //     case var h when h.Contains("vnexpress.net"):
-            //         HandleVnExpress(driver);
-            //         break;
-            //     case var h when h.Contains("thanhnien.vn"):
-            //         HandleThanhNien(driver, jpegQuality);
-            //         break;
-            //     default:
-            //         Console.WriteLine($"No specific handler for host: {host}. Using generic banner capture.");
-            //         CaptureGenericBanners(driver, host, jpegQuality);
-            //         break;
-            // }
-
-            // Chụp thêm ảnh full page để đảm bảo lưu toàn bộ quảng cáo xuất hiện trên trang
-            //CaptureFullPageScreenshot(driver, host);
-
-            // Chụp segment chia đều toàn bộ chiều dài trang
-            CaptureSegmentScreenshots(driver, host, segment_page, jpegQuality);
         }
 
+        /// <summary>
+        /// Setup Chrome để giả lập Desktop device
+        /// 
+        /// Cách thức hoạt động:
+        /// 1. Sử dụng Chrome DevTools Protocol để thiết lập desktop device
+        /// 2. Đặt viewport thành 1920x1080
+        /// 3. Đặt mobile = false, deviceScaleFactor = 1
+        /// 4. Đặt User Agent Desktop (Windows)
+        /// </summary>
+        private static void SetupDesktopDevice(IWebDriver driver)
+        {
+            try
+            {
+                var chrome = driver as ChromeDriver;
+                if (chrome != null)
+                {
+                    // Desktop device metrics
+                    var metrics = new Dictionary<string, object>
+                    {
+                        { "mobile", false },
+                        { "width", 1920 },
+                        { "height", 1080 },
+                        { "deviceScaleFactor", 1 },
+                        { "scale", 1 }
+                    };
+                    chrome.ExecuteCdpCommand("Emulation.setDeviceMetricsOverride", metrics);
+
+                    // Desktop User Agent
+                    var userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36";
+                    chrome.ExecuteCdpCommand("Network.setUserAgentOverride", new Dictionary<string, object>
+                    {
+                        { "userAgent", userAgent }
+                    });
+
+                    Console.WriteLine("[Desktop] Device emulation setup completed");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error setting up desktop device: {ex.Message}");
+                ErrorWriter.WriteLog(LogPath, "SetupDesktopDevice", ex.ToString());
+            }
+        }
+
+        /// <summary>
+        /// Xử lý đặc biệt cho website VnExpress
+        /// 
+        /// Cách thức hoạt động:
+        /// 1. Đợi trang web load hoàn toàn (readyState = "complete")
+        /// 2. Đảm bảo các quảng cáo ở phần đầu trang (top ads) đã được render
+        ///    - Cuộn lên đầu trang
+        ///    - Lắc scroll nhỏ để kích hoạt observer
+        ///    - Đếm số lượng quảng cáo hiển thị ở vùng top (từ 0 đến 900px)
+        ///    - Đợi cho đến khi số lượng quảng cáo ổn định (không thay đổi trong 2 lần kiểm tra)
+        /// 
+        /// Hàm này tối ưu cho VnExpress vì trang này có nhiều quảng cáo lazy-load ở đầu trang
+        /// </summary>
         private static void HandleVnExpress(IWebDriver driver)
         {
             var wait = new WebDriverWait(new SystemClock(), driver, TimeSpan.FromSeconds(15), TimeSpan.FromMilliseconds(250));
@@ -336,7 +455,24 @@ namespace ConsummerScreenPageBot
 
         }
 
-        // Quay lên đầu trang, kích lazy-load và chờ banner/iframe hiển thị gần đầu trang
+        /// <summary>
+        /// Đảm bảo các quảng cáo ở phần đầu trang VnExpress đã được render hoàn toàn
+        /// 
+        /// Cách thức hoạt động:
+        /// 1. Cuộn lên đầu trang (scrollTo(0,0))
+        /// 2. Trong khoảng thời gian maxWait:
+        ///    - Lắc scroll nhẹ (scroll 40px xuống rồi quay lại 0) để kích hoạt mutation observer
+        ///    - Chạy JavaScript để đếm số lượng quảng cáo hiển thị:
+        ///      * Tìm các selector: header banner, #banner_top, .gpt-ad, iframe, ...
+        ///      * Chỉ tính các quảng cáo có kích thước >= 120x30px và nằm trong vùng top (y < 900px)
+        ///    - Nếu số lượng quảng cáo ổn định trong 2 lần kiểm tra liên tiếp => thoát
+        ///    - Nếu không tìm thấy quảng cáo => đợi 220ms rồi kiểm tra lại
+        ///    - Nếu số lượng thay đổi => reset counter và tiếp tục
+        /// 
+        /// Tham số:
+        /// - driver: WebDriver
+        /// - maxWait: Thời gian tối đa để đợi quảng cáo load
+        /// </summary>
         private static void EnsureTopAdsOnVnExpress(IWebDriver driver, TimeSpan maxWait)
         {
             var js = (IJavaScriptExecutor)driver;
@@ -406,7 +542,22 @@ namespace ConsummerScreenPageBot
             }
         }
 
-        // Xóa tất cả file ảnh trong thư mục screenshots/<hostLabel>
+        /// <summary>
+        /// Xóa tất cả file ảnh cũ trong thư mục screenshots của host cụ thể
+        /// 
+        /// Cách thức hoạt động:
+        /// 1. Tạo đường dẫn thư mục screenshots/<hostLabel> (ví dụ: screenshots/vnexpress.net)
+        /// 2. Nếu thư mục không tồn tại => không làm gì
+        /// 3. Lấy danh sách tất cả file trong thư mục
+        /// 4. Duyệt qua từng file và xóa:
+        ///    - Nếu xóa thành công => tiếp tục
+        ///    - Nếu xóa lỗi => ghi log lỗi nhưng vẫn tiếp tục xóa file khác
+        /// 
+        /// Mục đích: Làm sạch thư mục trước khi chụp ảnh mới để tránh file cũ còn sót lại
+        /// 
+        /// Tham số:
+        /// - hostLabel: Hostname của website (ví dụ: "vnexpress.net")
+        /// </summary>
         private static void ClearHostScreenshots(string hostLabel)
         {
             try
@@ -427,66 +578,40 @@ namespace ConsummerScreenPageBot
             catch (Exception ex)
             {
                 ErrorWriter.WriteLog(LogPath, "ClearScreenshots", $"{hostLabel} => {ex}");
+                TelegramService.PushLogToTelegram($"ClearScreenshots Error - {hostLabel}", ex);
             }
         }
 
-        // Chụp full-page bằng cách đặt kích thước viewport theo kích thước tài liệu qua Chrome DevTools Protocol
-        private static void CaptureFullPageScreenshot(IWebDriver driver, string hostLabel, long jpegQuality)
-        {
-            try
-            {
-                var js = (IJavaScriptExecutor)driver;
-                int width = 1920;
-                int height = 1080;
-                try
-                {
-                    width = Convert.ToInt32(js.ExecuteScript("return Math.max(document.documentElement.clientWidth, window.innerWidth || 0);"));
-                    height = Convert.ToInt32(js.ExecuteScript("return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight, window.innerHeight || 0);"));
-                    // Giới hạn tối đa để tránh lỗi bộ nhớ trên các trang cực dài
-                    height = Math.Min(height, 30000);
-                }
-                catch { }
-
-                // Cuộn hết và chờ ngắn để lazy-load hoàn tất
-                ScrollToBottomAndEnsureLazyContent(driver, TimeSpan.FromSeconds(5));
-                TryProbeAdCandidates(driver, TimeSpan.FromSeconds(2));
-
-                var shotsDir = Path.Combine(startupPath, "screenshots", hostLabel);
-                if (!Directory.Exists(shotsDir)) Directory.CreateDirectory(shotsDir);
-
-                // Đặt viewport theo kích thước tài liệu để chụp full
-                var chrome = driver as ChromeDriver;
-                if (chrome != null)
-                {
-                    var metrics = new Dictionary<string, object>
-                    {
-                        { "mobile", false },
-                        { "width", width },
-                        { "height", height },
-                        { "deviceScaleFactor", 1 },
-                        { "scale", 1 }
-                    };
-                    try { chrome.ExecuteCdpCommand("Emulation.setDeviceMetricsOverride", metrics); } catch { }
-                }
-
-                try
-                {
-                    var shot = ((ITakesScreenshot)driver).GetScreenshot();
-                    var fileName = $"full_{DateTime.Now:yyyyMMdd_HHmmss_fff}_{Guid.NewGuid().ToString("N").Substring(0,6)}.jpg";
-                    var savePath = Path.Combine(shotsDir, fileName);
-                    AdCapture.SaveJpegCompressedFromBytes(shot.AsByteArray, savePath, 1.0, jpegQuality);
-                }
-                finally
-                {
-                    try { (driver as ChromeDriver)?.ExecuteCdpCommand("Emulation.clearDeviceMetricsOverride", new Dictionary<string, object>()); } catch { }
-                }
-            }
-            catch (Exception ex)
-            {
-                ErrorWriter.WriteLog(LogPath, "FullPageScreenshot", ex.ToString());
-            }
-        }
-
+       
+        /// <summary>
+        /// Chụp ảnh trang web bằng cách chia thành nhiều segment (phần) và chụp từng phần
+        /// 
+        /// Cách thức hoạt động:
+        /// 1. Lấy kích thước thực tế của trang (width x height)
+        ///    - Giới hạn chiều cao tối đa 30000px
+        /// 2. Cuộn xuống cuối trang và đợi quảng cáo load hoàn toàn
+        /// 3. Chụp ảnh toàn trang một lần bằng CDP:
+        ///    - Đặt viewport theo kích thước tài liệu
+        ///    - Chụp ảnh full page bằng Page.captureScreenshot
+        ///    - Nếu CDP fail => fallback về ITakesScreenshot
+        /// 4. Load ảnh full page vào ImageSharp để xử lý
+        /// 5. Chia ảnh thành N segment bằng nhau (slice):
+        ///    - Tính chiều cao mỗi segment: totalHeight / segmentCount
+        ///    - Với mỗi segment:
+        ///      * Cắt ảnh theo vị trí Y tương ứng (y = i * sliceHeight)
+        ///      * Lưu segment với tên file: split{i+1}_YYYYMMDD_HHmmss_ffffff_guid.jpg
+        ///      * Nén ảnh với chất lượng jpegQuality
+        ///      * Gửi ảnh lên queue analyze để AI xử lý
+        /// 6. Reset viewport về kích thước ban đầu
+        /// 
+        /// Ưu điểm: Chia nhỏ giúp AI dễ xử lý từng phần và giảm dung lượng mỗi ảnh
+        /// 
+        /// Tham số:
+        /// - driver: WebDriver
+        /// - hostLabel: Hostname
+        /// - segmentCount: Số lượng segment cần chia (mặc định 10)
+        /// - jpegQuality: Chất lượng JPEG
+        /// </summary>
         private static void CaptureSegmentScreenshots(IWebDriver driver, string hostLabel, int segmentCount, long jpegQuality)
         {
             try
@@ -498,8 +623,6 @@ namespace ConsummerScreenPageBot
                 // Kích hoạt lazy-load và đợi quảng cáo hiển thị trước khi chụp full
                 ScrollToBottomAndEnsureLazyContent(driver, TimeSpan.FromSeconds(8));
                 WaitForAdsLoaded(driver, TimeSpan.FromSeconds(6));
-                // Phủ lớp trắng lên các ảnh nhỏ (trừ ảnh trong iframe - chỉ chạy trên document hiện tại)
-                try { MaskSmallImages(driver, 120, 80); } catch { }
                 int pageWidth = 1920;
                 int totalHeight = 3000;
                 try
@@ -567,7 +690,6 @@ namespace ConsummerScreenPageBot
                     // No CDP: best effort viewport screenshot
                     try
                     {
-                        try { MaskSmallImages(driver, 120, 80); } catch { }
                         var shot = ((ITakesScreenshot)driver).GetScreenshot();
                         fullShotBytes = shot.AsByteArray;
                         fullOk = fullShotBytes != null && fullShotBytes.Length > 0;
@@ -613,10 +735,33 @@ namespace ConsummerScreenPageBot
             {
                 try { Console.WriteLine($"[Segment] ERROR {hostLabel}: {ex.Message}"); } catch { }
                 ErrorWriter.WriteLog(LogPath, "SegmentScreenshots", ex.ToString());
+                TelegramService.PushLogToTelegram($"SegmentScreenshots Error - {hostLabel}", ex);
             }
         }
 
-        // Đợi các vị trí quảng cáo phổ biến thật sự render (iframe có kích thước/ảnh đã load…) trước khi chụp
+        /// <summary>
+        /// Đợi các quảng cáo trên trang web được render hoàn toàn trước khi chụp ảnh
+        /// 
+        /// Cách thức hoạt động:
+        /// 1. Trong khoảng thời gian maxWait, liên tục kiểm tra:
+        /// 2. Chạy JavaScript để tính điểm "score" dựa trên:
+        ///    - iframe/frame: 
+        ///      * Mỗi iframe có kích thước >= 120x30px => +2 điểm
+        ///      * Nếu iframe có contentWindow => +1 điểm
+        ///    - Các container quảng cáo (theo selector):
+        ///      * Mỗi container có kích thước >= 120x30px => +2 điểm
+        ///      * Nếu có thẻ <img> đã load hoàn toàn (complete && naturalWidth>0) => +2 điểm
+        ///      * Nếu có thẻ <ins> với nội dung > 20 ký tự => +1 điểm
+        ///    - Document readyState = "complete" => +1 điểm
+        /// 3. Nếu score >= 4 và ổn định trong 2 lần kiểm tra liên tiếp => thoát (ads đã load xong)
+        /// 4. Nếu chưa đủ điều kiện => đợi 350ms rồi kiểm tra lại
+        /// 
+        /// Mục đích: Đảm bảo tất cả quảng cáo đã render trước khi chụp để không bỏ sót
+        /// 
+        /// Tham số:
+        /// - driver: WebDriver
+        /// - maxWait: Thời gian tối đa để đợi
+        /// </summary>
         private static void WaitForAdsLoaded(IWebDriver driver, TimeSpan maxWait)
         {
             var js = (IJavaScriptExecutor)driver;
@@ -660,7 +805,31 @@ namespace ConsummerScreenPageBot
             }
         }
 
-        // Phủ lớp trắng lên các ảnh nhỏ trên document gốc (không can thiệp ảnh trong iframe)
+        /// <summary>
+        /// Phủ lớp màu trắng lên các hình ảnh nhỏ trên trang để giảm dung lượng ảnh chụp màn hình
+        /// 
+        /// Cách thức hoạt động:
+        /// 1. Tìm tất cả thẻ <img> trên document (không xử lý ảnh trong iframe)
+        /// 2. Với mỗi ảnh:
+        ///    - Lấy kích thước thực tế bằng getBoundingClientRect()
+        ///    - Nếu kích thước nhỏ hơn minWidth HOẶC minHeight:
+        ///      * Tạo một thẻ <div> với:
+        ///        - position: fixed
+        ///        - Vị trí và kích thước trùng khớp với ảnh
+        ///        - background: màu trắng (#fff)
+        ///        - z-index: tối đa để phủ lên trên
+        ///        - pointer-events: none (không chặn click)
+        ///      * Append vào document.body
+        /// 3. Trả về số lượng overlay đã tạo
+        /// 
+        /// Mục đích: Các ảnh nhỏ (icon, avatar, thumbnail) thường không quan trọng cho việc phân tích quảng cáo
+        /// Phủ trắng giúp nén ảnh tốt hơn, giảm dung lượng và tăng tốc độ xử lý
+        /// 
+        /// Tham số:
+        /// - driver: WebDriver
+        /// - minWidth: Chiều rộng tối thiểu để không bị phủ (mặc định 120px)
+        /// - minHeight: Chiều cao tối thiểu để không bị phủ (mặc định 80px)
+        /// </summary>
         private static void MaskSmallImages(IWebDriver driver, int minWidth, int minHeight)
         {
             var js = (IJavaScriptExecutor)driver;
@@ -693,6 +862,24 @@ namespace ConsummerScreenPageBot
             try { js.ExecuteScript(script, minWidth, minHeight); } catch { }
         }
 
+        /// <summary>
+        /// Gửi ảnh đã chụp lên RabbitMQ queue để AI (Gemini) phân tích
+        /// 
+        /// Cách thức hoạt động:
+        /// 1. Kiểm tra ảnh hợp lệ (không null, không rỗng)
+        /// 2. Kiểm tra queue analyze đã được cấu hình
+        /// 3. Đảm bảo kết nối RabbitMQ analyze publisher đã sẵn sàng (EnsureAnalyzePublisherReady)
+        /// 4. Build payload chứa:
+        ///    - Ảnh (dạng base64 hoặc raw bytes tùy theo analyze_publish_raw)
+        ///    - Thông tin từ job gốc (link_web, slice, quanlity_image, ...)
+        /// 5. Gửi message lên queue RabbitQueueAnalyze với persistent = true (không mất khi server restart)
+        /// 6. Log kích thước message đã gửi
+        /// 
+        /// Nếu lỗi: Ghi log nhưng không throw exception (tránh ảnh hưởng đến luồng chính)
+        /// 
+        /// Tham số:
+        /// - imageBytes: Mảng byte chứa dữ liệu ảnh đã nén
+        /// </summary>
         public static void TryPublishAnalyze(byte[] imageBytes)
         {
             try
@@ -720,6 +907,26 @@ namespace ConsummerScreenPageBot
             }
         }
 
+        /// <summary>
+        /// Đảm bảo kết nối RabbitMQ cho analyze publisher đã sẵn sàng
+        /// 
+        /// Cách thức hoạt động:
+        /// 1. Kiểm tra channel đã tồn tại và đang mở => return luôn
+        /// 2. Sử dụng lock để tránh race condition khi nhiều thread cùng tạo connection
+        /// 3. Double-check: Kiểm tra lại channel sau khi vào lock
+        /// 4. Dispose connection và channel cũ nếu có
+        /// 5. Tạo ConnectionFactory với cấu hình:
+        ///    - Host, User, Password, VirtualHost, Port từ config
+        ///    - Bật AutomaticRecoveryEnabled để tự động reconnect khi mất kết nối
+        ///    - NetworkRecoveryInterval: 5 giây
+        ///    - RequestedConnectionTimeout: 30 giây
+        ///    - RequestedHeartbeat: 30 giây
+        ///    - Nếu rabbit_use_ssl = "1" hoặc port = 5671 => bật SSL
+        /// 6. Tạo connection và channel mới
+        /// 7. Declare queue RabbitQueueAnalyze với durable = true (không mất khi server restart)
+        /// 
+        /// Nếu lỗi: Ghi log nhưng không throw (graceful degradation)
+        /// </summary>
         private static void EnsureAnalyzePublisherReady()
         {
             if (analyzeChannel != null && analyzeChannel.IsOpen) return;
@@ -769,7 +976,27 @@ namespace ConsummerScreenPageBot
             }
         }
 
-        // Lấy danh sách các rect (top/bottom theo toạ độ tài liệu) của các phần tử có khả năng là quảng cáo
+        /// <summary>
+        /// Phát hiện các vùng chứa quảng cáo trên trang và trả về danh sách tọa độ (top, bottom)
+        /// 
+        /// Cách thức hoạt động:
+        /// 1. Lấy danh sách selector quảng cáo phổ biến (GetCommonAdSelectors)
+        /// 2. Chạy JavaScript để:
+        ///    - Tìm tất cả element khớp với selector
+        ///    - Lấy tọa độ của mỗi element bằng getBoundingClientRect()
+        ///    - Chỉ tính các element có kích thước >= 120x30px (kích thước quảng cáo tối thiểu)
+        ///    - Tính top/bottom theo tọa độ tài liệu (scrollY + getBoundingClientRect().top)
+        ///    - Trả về mảng [[top1, bottom1], [top2, bottom2], ...]
+        /// 3. Parse kết quả từ JavaScript về C# List<(int Top, int Bottom)>
+        /// 4. Gộp các rect chồng lấn bằng MergeOverlappingRects để tối ưu
+        /// 
+        /// Mục đích: Xác định vị trí quảng cáo để tránh cắt ảnh ngang qua quảng cáo khi chia segment
+        /// 
+        /// Tham số:
+        /// - driver: WebDriver
+        /// 
+        /// Trả về: Danh sách (Top, Bottom) của các vùng quảng cáo, đã được gộp nếu chồng lấn
+        /// </summary>
         private static List<(int Top, int Bottom)> TryDetectAdRects(IWebDriver driver)
         {
             var results = new List<(int Top, int Bottom)>();
@@ -815,7 +1042,31 @@ namespace ConsummerScreenPageBot
             return results;
         }
 
-        // Hợp nhất các khoảng [top,bottom] chồng lấn
+        /// <summary>
+        /// Gộp các khoảng tọa độ [top, bottom] nếu chúng chồng lấn hoặc gần nhau
+        /// 
+        /// Cách thức hoạt động:
+        /// 1. Nếu danh sách rỗng => trả về list rỗng
+        /// 2. Sắp xếp các rect theo Top (từ trên xuống)
+        /// 3. Duyệt qua từng rect:
+        ///    - Lấy rect đầu tiên làm current
+        ///    - Với mỗi rect tiếp theo:
+        ///      * Nếu Top của rect tiếp theo <= Bottom của current (chồng lấn):
+        ///        - Gộp: current.Bottom = max(current.Bottom, rect.Bottom)
+        ///      * Nếu không chồng lấn:
+        ///        - Thêm current vào kết quả
+        ///        - Set current = rect tiếp theo
+        /// 4. Thêm rect cuối cùng vào kết quả
+        /// 
+        /// Ví dụ: [(0,100), (50,150), (200,300)] => [(0,150), (200,300)]
+        /// 
+        /// Mục đích: Giảm số lượng rect để tối ưu tính toán sau này
+        /// 
+        /// Tham số:
+        /// - rects: Danh sách các khoảng (Top, Bottom) có thể chồng lấn
+        /// 
+        /// Trả về: Danh sách đã được gộp, không còn chồng lấn
+        /// </summary>
         private static List<(int Top, int Bottom)> MergeOverlappingRects(List<(int Top, int Bottom)> rects)
         {
             if (rects == null || rects.Count == 0) return new List<(int Top, int Bottom)>();
@@ -839,7 +1090,36 @@ namespace ConsummerScreenPageBot
             return merged;
         }
 
-        // Điều chỉnh toạ độ bắt đầu của lát cắt sao cho biên trên/dưới không nằm giữa một khối quảng cáo
+        /// <summary>
+        /// Điều chỉnh vị trí bắt đầu của segment để tránh cắt ngang qua quảng cáo
+        /// 
+        /// Cách thức hoạt động:
+        /// 1. Nếu không có quảng cáo => trả về proposedY (có giới hạn trong phạm vi trang)
+        /// 2. Kiểm tra biên trên và biên dưới của viewport có an toàn không:
+        ///    - Biên trên: y + margin
+        ///    - Biên dưới: y + viewportHeight - margin
+        ///    - An toàn = không nằm giữa bất kỳ quảng cáo nào
+        /// 3. Nếu vị trí đề xuất (proposedY) an toàn => trả về luôn
+        /// 4. Nếu không an toàn => tìm vị trí gần nhất an toàn:
+        ///    - Tìm trong bán kính searchRadius (min(200, viewportHeight/3))
+        ///    - Thử từ proposedY ± 0, 1, 2, ... pixels
+        ///    - Dừng khi tìm thấy vị trí an toàn
+        /// 5. Nếu không tìm được => điều chỉnh đến mép quảng cáo gần nhất:
+        ///    - Nếu biên trên nằm giữa quảng cáo => đưa lên top của quảng cáo - margin
+        ///    - Nếu biên dưới nằm giữa quảng cáo => đẩy xuống bottom của quảng cáo + margin
+        /// 6. Đảm bảo kết quả >= minY và <= totalHeight - viewportHeight
+        /// 
+        /// Mục đích: Tránh cắt ảnh ngang qua quảng cáo để AI dễ nhận diện quảng cáo nguyên vẹn
+        /// 
+        /// Tham số:
+        /// - proposedY: Vị trí Y đề xuất ban đầu
+        /// - viewportHeight: Chiều cao viewport để chụp
+        /// - totalHeight: Chiều cao tổng của trang
+        /// - adRects: Danh sách vùng quảng cáo đã được gộp
+        /// - minY: Vị trí Y tối thiểu cho phép
+        /// 
+        /// Trả về: Vị trí Y đã được điều chỉnh để tránh quảng cáo
+        /// </summary>
         private static int AdjustSliceStartToAvoidAds(int proposedY, int viewportHeight, int totalHeight, List<(int Top, int Bottom)> adRects, int minY)
         {
             if (adRects == null || adRects.Count == 0)
@@ -909,6 +1189,29 @@ namespace ConsummerScreenPageBot
             return Math.Max(minY, Math.Max(0, Math.Min(bestY, totalHeight - viewportHeight)));
         }
 
+        /// <summary>
+        /// Xử lý đặc biệt cho website ThanhNien.vn để chụp quảng cáo
+        /// 
+        /// Cách thức hoạt động:
+        /// 1. Đợi trang web load hoàn toàn (readyState = "complete")
+        /// 2. Đảm bảo các quảng cáo ở phần đầu trang đã được render (EnsureTopAdsNearTop)
+        /// 3. Tạo danh sách selector quảng cáo đặc thù cho ThanhNien:
+        ///    - Selector chung từ GetCommonAdSelectors()
+        ///    - Selector riêng: header .banner, #banner_top, .gpt-ad, .qc, .quangcao
+        /// 4. Chụp các element quảng cáo bằng CaptureBySelectors
+        ///    - Tìm các element khớp với selector
+        ///    - Cuộn element vào view
+        ///    - Đợi element render
+        ///    - Cắt ảnh từ screenshot toàn trang và lưu
+        /// 5. Chụp các iframe quảng cáo bằng CaptureAdIframes
+        ///    - Tìm tất cả iframe/frame
+        ///    - Lọc iframe có kích thước >= 120x30px
+        ///    - Chụp và lưu từng iframe
+        /// 
+        /// Tham số:
+        /// - driver: WebDriver đã điều hướng tới ThanhNien
+        /// - jpegQuality: Chất lượng JPEG để nén ảnh
+        /// </summary>
         private static void HandleThanhNien(IWebDriver driver, long jpegQuality)
         {
             var wait = new WebDriverWait(new SystemClock(), driver, TimeSpan.FromSeconds(15), TimeSpan.FromMilliseconds(250));
@@ -933,6 +1236,29 @@ namespace ConsummerScreenPageBot
             AdCapture.CaptureAdIframes(driver, "thanhnien.vn", startupPath, LogPath, jpegQuality);
         }
 
+        /// <summary>
+        /// Chụp quảng cáo chung cho các website không có handler riêng
+        /// 
+        /// Cách thức hoạt động:
+        /// 1. Đảm bảo quảng cáo ở phần đầu trang đã render (EnsureTopAdsNearTop)
+        /// 2. Tạo danh sách selector quảng cáo generic:
+        ///    - Selector chung từ GetCommonAdSelectors() (gpt-ad, dfp-ad, adsbygoogle, ...)
+        ///    - Selector generic: div.banner, [id*='banner'], [class*='banner-ads'], ...
+        /// 3. Chụp các element quảng cáo:
+        ///    - Duyệt qua từng selector
+        ///    - Tìm tối đa 10 element đầu tiên
+        ///    - Cuộn element vào view, đợi render
+        ///    - Cắt ảnh và lưu vào screenshots/<hostLabel>/
+        ///    - Tự động publish lên analyze queue
+        /// 4. Chụp các iframe quảng cáo (nhiều quảng cáo dùng iframe)
+        /// 
+        /// Ưu điểm: Áp dụng được cho hầu hết website không cần xử lý đặc biệt
+        /// 
+        /// Tham số:
+        /// - driver: WebDriver
+        /// - hostLabel: Hostname để đặt tên thư mục
+        /// - jpegQuality: Chất lượng JPEG
+        /// </summary>
         private static void CaptureGenericBanners(IWebDriver driver, string hostLabel, long jpegQuality)
         {
             // Đảm bảo khu vực top ads sẵn sàng trên các trang khác
@@ -951,26 +1277,53 @@ namespace ConsummerScreenPageBot
             AdCapture.CaptureAdIframes(driver, hostLabel, startupPath, LogPath, jpegQuality);
         }
 
-        // Wrapper giữ tương thích cũ, ủy thác sang Utils/AdCapture (thêm jpegQuality)
+        /// <summary>
+        /// Wrapper function để giữ tương thích với code cũ
+        /// 
+        /// Cách thức hoạt động:
+        /// - Chuyển giao toàn bộ xử lý sang Utils.AdCapture.CaptureBySelectors
+        /// - Truyền thêm tham số jpegQuality để nén ảnh
+        /// 
+        /// Tham số:
+        /// - driver: WebDriver
+        /// - selectors: Mảng CSS selector để tìm quảng cáo
+        /// - hostLabel: Hostname
+        /// - jpegQuality: Chất lượng JPEG
+        /// </summary>
         private static void CaptureBySelectors(IWebDriver driver, string[] selectors, string hostLabel, long jpegQuality)
         {
             AdCapture.CaptureBySelectors(driver, selectors, hostLabel, startupPath, LogPath, jpegQuality);
         }
-
-        // (moved to Utils/AdCapture.cs)
-
+     
         /// <summary>
         /// Lưu lại ảnh chụp màn hình của một phần tử (element), cắt từ screenshot toàn trang, vào thư mục theo hostLabel.
         /// Nếu không cắt được (tọa độ vượt ngoài ảnh), sẽ lưu toàn bộ screenshot thay thế.
         /// </summary>
         // (moved to Utils/AdCapture.cs)
 
-        // Tạo nhãn tên phần tử từ id hoặc class để đặt tên file
-        // (moved to Utils/AdCapture.cs)
+        // Tạo nhãn tên phần tử từ id hoặc class để đặt tên file     
 
-        // (moved to Utils/AdCapture.cs)
-
-        // Generic: quay lên đầu trang, kích lazy-load và chờ banner/iframe hiện ở gần đầu trang (áp dụng rộng rãi)
+        /// <summary>
+        /// Đảm bảo các quảng cáo ở phần đầu trang đã được render (hàm generic áp dụng cho mọi website)
+        /// 
+        /// Cách thức hoạt động:
+        /// 1. Cuộn lên đầu trang (scrollTo(0,0))
+        /// 2. Trong khoảng thời gian maxWait, liên tục:
+        ///    - Lắc scroll nhẹ (scroll 60px xuống rồi quay lại 0) để kích hoạt lazy-loading
+        ///    - Chạy JavaScript để đếm số lượng quảng cáo hiển thị:
+        ///      * Tìm các selector: header banner, #banner_top, .gpt-ad, iframe, ...
+        ///      * Chỉ tính quảng cáo có kích thước >= 120x30px và nằm trong vùng top (y < 900px)
+        ///    - Nếu số lượng quảng cáo = 0 => đợi 220ms rồi kiểm tra lại
+        ///    - Nếu số lượng ổn định trong 2 lần kiểm tra liên tiếp => thoát
+        ///    - Nếu số lượng thay đổi => reset counter và tiếp tục
+        /// 3. Thoát khi đã đợi hết maxWait hoặc quảng cáo đã ổn định
+        /// 
+        /// Khác với EnsureTopAdsOnVnExpress: Hàm này generic, có thể dùng cho mọi website
+        /// 
+        /// Tham số:
+        /// - driver: WebDriver
+        /// - maxWait: Thời gian tối đa để đợi
+        /// </summary>
         private static void EnsureTopAdsNearTop(IWebDriver driver, TimeSpan maxWait)
         {
             var js = (IJavaScriptExecutor)driver;
@@ -1040,6 +1393,39 @@ namespace ConsummerScreenPageBot
             }
         }
 
+        /// <summary>
+        /// Tự động tìm đường dẫn Chrome/Chromium binary trên hệ thống
+        /// 
+        /// Cách thức hoạt động:
+        /// 1. Kiểm tra hệ điều hành (macOS, Linux, Windows)
+        /// 2. Với mỗi OS, thử các đường dẫn phổ biến:
+        /// 
+        /// macOS:
+        ///    - /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+        ///    - /Applications/Chromium.app/Contents/MacOS/Chromium
+        /// 
+        /// Linux:
+        ///    - /usr/bin/google-chrome
+        ///    - /usr/bin/google-chrome-stable
+        ///    - /usr/bin/chromium
+        ///    - /usr/bin/chromium-browser
+        /// 
+        /// Windows:
+        ///    - ProgramFiles\Google\Chrome\Application\chrome.exe
+        ///    - ProgramFiles(x86)\Google\Chrome\Application\chrome.exe
+        ///    - LocalApplicationData\Google\Chrome\Application\chrome.exe
+        ///    - ProgramFiles\Chromium\Application\chrome.exe
+        ///    - ProgramFiles(x86)\Chromium\Application\chrome.exe
+        ///    - Registry: HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe
+        ///    - Registry: HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe
+        /// 
+        /// 3. Trả về đường dẫn đầu tiên tìm thấy file tồn tại
+        /// 4. Nếu không tìm thấy => trả về chuỗi rỗng
+        /// 
+        /// Mục đích: Tự động phát hiện Chrome để không cần cấu hình thủ công
+        /// 
+        /// Trả về: Đường dẫn đầy đủ đến Chrome binary, hoặc chuỗi rỗng nếu không tìm thấy
+        /// </summary>
         private static string FindChromeBinaryPath()
         {
             try
@@ -1105,6 +1491,38 @@ namespace ConsummerScreenPageBot
             return string.Empty;
         }
 
+        /// <summary>
+        /// Thử điều hướng tới URL với nhiều phương pháp và retry
+        /// 
+        /// Cách thức hoạt động:
+        /// 1. Có tối đa 2 lần thử (attempt = 1, 2)
+        /// 2. Lần thử 1: Dùng driver.Navigate().GoToUrl(url)
+        ///    - Đợi document readyState = "complete" hoặc "interactive" trong 20 giây
+        ///    - Nếu thành công => return true
+        ///    - Nếu fail => lưu lỗi và tiếp tục
+        /// 3. Lần thử 2: Dùng JavaScript redirect (window.location.href = url)
+        ///    - Đôi khi phương pháp này thành công khi GoToUrl() bị block
+        ///    - Đợi readyState trong 25 giây
+        ///    - Nếu thành công => return true
+        /// 4. Nếu cả 2 lần đều fail:
+        ///    - Kiểm tra URL hiện tại của driver
+        ///    - Nếu có URL => thêm vào failureReason
+        ///    - Ghi log exception cuối cùng
+        ///    - Return false
+        /// 
+        /// Xử lý exception:
+        /// - WebDriverTimeoutException: Timeout khi điều hướng
+        /// - WebDriverException: Lỗi WebDriver
+        /// - Exception khác: Lỗi chung
+        /// 
+        /// Tham số:
+        /// - driver: WebDriver
+        /// - url: URL cần điều hướng tới
+        /// - timeout: Thời gian timeout tổng
+        /// - failureReason: Lý do thất bại (output parameter)
+        /// 
+        /// Trả về: true nếu điều hướng thành công, false nếu thất bại
+        /// </summary>
         private static bool TryNavigate(IWebDriver driver, string url, TimeSpan timeout, out string failureReason)
         {
             var deadline = DateTime.UtcNow + timeout;
@@ -1166,6 +1584,26 @@ namespace ConsummerScreenPageBot
             return false;
         }
 
+        /// <summary>
+        /// Đợi trang web đạt trạng thái ready (đã load xong)
+        /// 
+        /// Cách thức hoạt động:
+        /// 1. Tạo WebDriverWait với thời gian chờ = wait, poll interval = 250ms
+        /// 2. Liên tục kiểm tra document.readyState bằng JavaScript:
+        ///    - "complete": Trang đã load hoàn toàn
+        ///    - "interactive": DOM đã sẵn sàng, nhưng có thể còn resource đang load
+        /// 3. Nếu readyState = "complete" hoặc "interactive" => return true
+        /// 4. Nếu quá timeout => return false
+        /// 5. Nếu có lỗi khi chạy JavaScript => return false
+        /// 
+        /// Lưu ý: Đây là cách tiêu chuẩn để đợi trang load trước khi thao tác
+        /// 
+        /// Tham số:
+        /// - driver: WebDriver
+        /// - wait: Thời gian tối đa để đợi
+        /// 
+        /// Trả về: true nếu trang đã ready, false nếu timeout hoặc lỗi
+        /// </summary>
         private static bool WaitForReadyState(IWebDriver driver, TimeSpan wait)
         {
             try
@@ -1190,7 +1628,28 @@ namespace ConsummerScreenPageBot
             }
         }
 
-        // Bộ selector chung áp dụng cho nhiều trang tin để bắt hầu hết container quảng cáo phổ biến
+        /// <summary>
+        /// Trả về danh sách CSS selector chung để tìm quảng cáo trên hầu hết website
+        /// 
+        /// Cách thức hoạt động:
+        /// Trả về mảng các selector phổ biến, bao gồm:
+        /// 1. Selector theo id/class chứa từ khóa:
+        ///    - ad, ads, advert, banner (ví dụ: [id*='ad'], [class*='ad-'])
+        /// 2. Selector của các platform quảng cáo phổ biến:
+        ///    - Google DFP/GPT: .gpt-ad, .gpt-unit, .gpt-slot, .dfp-ad, [id^='div-gpt-ad']
+        ///    - Google AdSense: .adsbygoogle, .google-auto-placed
+        ///    - Ad container: .ad-slot, .ad-container, .ad-wrapper, .ad__container
+        /// 3. Selector quảng cáo tự nhiên/sponsored:
+        ///    - .sponsor, .sponsored, .promoted, .native-ad, .in-content-ad
+        /// 4. Selector theo vị trí:
+        ///    - .header-ad, .footer-ad, .sidebar-ad, .sticky-ad, .floating-ad
+        /// 5. Selector theo data attribute:
+        ///    - [data-ad], [data-ad-slot], [data-ad-unit], [data-google-query-id]
+        /// 
+        /// Mục đích: Tập hợp selector phổ biến nhất để tìm quảng cáo trên đa số website
+        /// 
+        /// Trả về: Mảng string chứa các CSS selector
+        /// </summary>
         private static string[] GetCommonAdSelectors()
         {
             return new[]
@@ -1213,7 +1672,30 @@ namespace ConsummerScreenPageBot
             };
         }
 
-        // Cuộn xuống cuối trang theo từng bước để kích hoạt lazy-load; dừng khi chiều cao trang không tăng thêm vài lần liên tiếp
+        /// <summary>
+        /// Cuộn trang xuống cuối để kích hoạt lazy-loading và đảm bảo nội dung đã load hết
+        /// 
+        /// Cách thức hoạt động:
+        /// 1. Lấy chiều cao ban đầu của trang (document.scrollHeight)
+        /// 2. Trong khoảng thời gian maxWait, lặp lại:
+        ///    - Cuộn xuống cuối trang (scrollTo(0, document.body.scrollHeight))
+        ///    - Đợi 500ms để nội dung lazy-load render
+        ///    - Lấy chiều cao mới của trang
+        ///    - So sánh với chiều cao cũ:
+        ///      * Nếu bằng nhau => stableRounds++
+        ///      * Nếu khác nhau => reset stableRounds = 0, cập nhật lastHeight
+        ///    - Nếu stableRounds >= 3 (chiều cao không đổi trong 3 lần liên tiếp) => thoát
+        /// 3. Sau khi thoát: Đợi thêm readyState = "complete" trong 2 giây để chắc chắn
+        /// 
+        /// Mục đích: 
+        /// - Kích hoạt lazy-loading: Nhiều website load nội dung khi scroll xuống
+        /// - Đảm bảo quảng cáo ở cuối trang đã được load trước khi chụp ảnh
+        /// - Tối ưu: Dừng sớm khi không còn nội dung mới load
+        /// 
+        /// Tham số:
+        /// - driver: WebDriver
+        /// - maxWait: Thời gian tối đa để cuộn và đợi
+        /// </summary>
         private static void ScrollToBottomAndEnsureLazyContent(IWebDriver driver, TimeSpan maxWait)
         {
             var js = (IJavaScriptExecutor)driver;
@@ -1261,7 +1743,30 @@ namespace ConsummerScreenPageBot
             WaitForReadyState(driver, TimeSpan.FromSeconds(2));
         }
 
-        // Thăm dò nhẹ xem các phần tử có khả năng là quảng cáo đã xuất hiện chưa (không bắt buộc)
+        /// <summary>
+        /// Thăm dò xem các phần tử quảng cáo đã xuất hiện trên trang chưa (hàm phụ trợ)
+        /// 
+        /// Cách thức hoạt động:
+        /// 1. Trong khoảng thời gian wait, liên tục:
+        /// 2. Chạy JavaScript để đếm số lượng element quảng cáo:
+        ///    - Selector: div.banner, section.banner, #banner, [id*='banner'], 
+        ///                [class*='banner'], div.ads, .ads, [id*='ads'], 
+        ///                [class*='ad-'], [class*='ads-'], div.advertisement, 
+        ///                .advertisement, [class*='advert']
+        ///    - Trả về tổng số element tìm thấy
+        /// 3. So sánh với lần kiểm tra trước:
+        ///    - Nếu bằng nhau => stable++
+        ///    - Nếu khác nhau => reset stable = 0, cập nhật lastCount
+        /// 4. Nếu stable >= 2 (số lượng ổn định trong 2 lần liên tiếp) => thoát
+        /// 5. Đợi 300ms trước khi kiểm tra lại
+        /// 
+        /// Mục đích: Thăm dò nhanh xem quảng cáo đã render chưa, không đợi quá lâu
+        /// Khác với WaitForAdsLoaded: Hàm này chỉ thăm dò, không chờ quá kỹ
+        /// 
+        /// Tham số:
+        /// - driver: WebDriver
+        /// - wait: Thời gian tối đa để thăm dò
+        /// </summary>
         private static void TryProbeAdCandidates(IWebDriver driver, TimeSpan wait)
         {
             var js = (IJavaScriptExecutor)driver;
@@ -1295,5 +1800,5 @@ namespace ConsummerScreenPageBot
         }
     }
 
-    // (moved to Utils/ErrorWriter.cs)
+    
 }
