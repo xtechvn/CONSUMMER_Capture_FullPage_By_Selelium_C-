@@ -1,0 +1,43 @@
+[2025-11-04 12:47:22] [SetupDesktopDevice] OpenQA.Selenium.WebDriverException: invalid session id: session deleted as the browser has closed the connection
+from disconnected: not connected to DevTools
+  (Session info: chrome=142.0.7444.59)
+   at OpenQA.Selenium.WebDriver.UnpackAndThrowOnError(Response errorResponse, String commandToExecute)
+   at OpenQA.Selenium.WebDriver.Execute(String driverCommandToExecute, Dictionary`2 parameters)
+   at OpenQA.Selenium.Chromium.ChromiumDriver.ExecuteCdpCommand(String commandName, Dictionary`2 commandParameters)
+   at ConsummerScreenPageBot.Program.SetupDesktopDevice(IWebDriver driver) in /Users/lecuong/Source_Code/CONSUMMER_CAPTURE_PAGE_SE_C#/CONSUMMER_Capture_FullPage_By_Selelium_C-/ConsummerScreenPageBot/Program.cs:line 412
+[2025-11-04 13:32:40] [SetupDesktopDevice] OpenQA.Selenium.WebDriverException: invalid session id: session deleted as the browser has closed the connection
+from disconnected: not connected to DevTools
+  (Session info: chrome=142.0.7444.59)
+   at OpenQA.Selenium.WebDriver.UnpackAndThrowOnError(Response errorResponse, String commandToExecute)
+   at OpenQA.Selenium.WebDriver.Execute(String driverCommandToExecute, Dictionary`2 parameters)
+   at OpenQA.Selenium.Chromium.ChromiumDriver.ExecuteCdpCommand(String commandName, Dictionary`2 commandParameters)
+   at ConsummerScreenPageBot.Program.SetupDesktopDevice(IWebDriver driver) in /Users/lecuong/Source_Code/CONSUMMER_CAPTURE_PAGE_SE_C#/CONSUMMER_Capture_FullPage_By_Selelium_C-/ConsummerScreenPageBot/Program.cs:line 412
+[2025-11-04 13:33:30] [ProcessDevice] 1 - https://vnexpress.net/ => OpenQA.Selenium.WebDriverException: invalid session id
+   at OpenQA.Selenium.WebDriver.UnpackAndThrowOnError(Response errorResponse, String commandToExecute)
+   at OpenQA.Selenium.WebDriver.Execute(String driverCommandToExecute, Dictionary`2 parameters)
+   at OpenQA.Selenium.WebDriver.get_Url()
+   at ConsummerScreenPageBot.Program.TryNavigate(IWebDriver driver, String url, TimeSpan timeout, String& failureReason) in /Users/lecuong/Source_Code/CONSUMMER_CAPTURE_PAGE_SE_C#/CONSUMMER_Capture_FullPage_By_Selelium_C-/ConsummerScreenPageBot/Program.cs:line 1574
+   at ConsummerScreenPageBot.Program.<>c__DisplayClass17_1.<Main>b__0(Object sender, BasicDeliverEventArgs ea) in /Users/lecuong/Source_Code/CONSUMMER_CAPTURE_PAGE_SE_C#/CONSUMMER_Capture_FullPage_By_Selelium_C-/ConsummerScreenPageBot/Program.cs:line 259
+[2025-11-04 13:33:49] [SetupDesktopDevice] OpenQA.Selenium.WebDriverException: invalid session id
+   at OpenQA.Selenium.WebDriver.UnpackAndThrowOnError(Response errorResponse, String commandToExecute)
+   at OpenQA.Selenium.WebDriver.Execute(String driverCommandToExecute, Dictionary`2 parameters)
+   at OpenQA.Selenium.Chromium.ChromiumDriver.ExecuteCdpCommand(String commandName, Dictionary`2 commandParameters)
+   at ConsummerScreenPageBot.Program.SetupDesktopDevice(IWebDriver driver) in /Users/lecuong/Source_Code/CONSUMMER_CAPTURE_PAGE_SE_C#/CONSUMMER_Capture_FullPage_By_Selelium_C-/ConsummerScreenPageBot/Program.cs:line 412
+[2025-11-04 13:34:39] [ProcessDevice] 1 - https://vnexpress.net/ => OpenQA.Selenium.WebDriverException: invalid session id
+   at OpenQA.Selenium.WebDriver.UnpackAndThrowOnError(Response errorResponse, String commandToExecute)
+   at OpenQA.Selenium.WebDriver.Execute(String driverCommandToExecute, Dictionary`2 parameters)
+   at OpenQA.Selenium.WebDriver.get_Url()
+   at ConsummerScreenPageBot.Program.TryNavigate(IWebDriver driver, String url, TimeSpan timeout, String& failureReason) in /Users/lecuong/Source_Code/CONSUMMER_CAPTURE_PAGE_SE_C#/CONSUMMER_Capture_FullPage_By_Selelium_C-/ConsummerScreenPageBot/Program.cs:line 1574
+   at ConsummerScreenPageBot.Program.<>c__DisplayClass17_1.<Main>b__0(Object sender, BasicDeliverEventArgs ea) in /Users/lecuong/Source_Code/CONSUMMER_CAPTURE_PAGE_SE_C#/CONSUMMER_Capture_FullPage_By_Selelium_C-/ConsummerScreenPageBot/Program.cs:line 259
+[2025-11-04 13:46:47] [SetupDesktopDevice] OpenQA.Selenium.WebDriverException: invalid session id: session deleted as the browser has closed the connection
+from disconnected: not connected to DevTools
+  (Session info: chrome=142.0.7444.59)
+   at OpenQA.Selenium.WebDriver.UnpackAndThrowOnError(Response errorResponse, String commandToExecute)
+   at OpenQA.Selenium.WebDriver.Execute(String driverCommandToExecute, Dictionary`2 parameters)
+   at OpenQA.Selenium.Chromium.ChromiumDriver.ExecuteCdpCommand(String commandName, Dictionary`2 commandParameters)
+   at ConsummerScreenPageBot.Program.SetupDesktopDevice(IWebDriver driver) in /Users/lecuong/Source_Code/CONSUMMER_CAPTURE_PAGE_SE_C#/CONSUMMER_Capture_FullPage_By_Selelium_C-/ConsummerScreenPageBot/Program.cs:line 412
+[2025-11-04 13:46:57] [SetupDesktopDevice] OpenQA.Selenium.WebDriverException: invalid session id
+   at OpenQA.Selenium.WebDriver.UnpackAndThrowOnError(Response errorResponse, String commandToExecute)
+   at OpenQA.Selenium.WebDriver.Execute(String driverCommandToExecute, Dictionary`2 parameters)
+   at OpenQA.Selenium.Chromium.ChromiumDriver.ExecuteCdpCommand(String commandName, Dictionary`2 commandParameters)
+   at ConsummerScreenPageBot.Program.SetupDesktopDevice(IWebDriver driver) in /Users/lecuong/Source_Code/CONSUMMER_CAPTURE_PAGE_SE_C#/CONSUMMER_Capture_FullPage_By_Selelium_C-/ConsummerScreenPageBot/Program.cs:line 412

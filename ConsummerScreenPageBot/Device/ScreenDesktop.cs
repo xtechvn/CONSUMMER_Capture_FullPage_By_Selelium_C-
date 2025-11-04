@@ -89,18 +89,26 @@ namespace ConsummerScreenPageBot.Device
                 if (segmentCount <= 0) segmentCount = 3;
 
                 var js = (IJavaScriptExecutor)driver;
-                // Kích hoạt lazy-load và đợi quảng cáo hiển thị trước khi chụp full
-                ScrollToBottomAndEnsureLazyContent(driver, TimeSpan.FromSeconds(10));
                 
-                // Cuộn về đầu trang để đảm bảo banner top đã load
-                try { js.ExecuteScript("window.scrollTo(0, 0);"); } catch { }
-                Thread.Sleep(1500); // Đợi banner top load
+                // Bước 1: Scroll xuống cuối trang để kích hoạt lazy-load
+                Console.WriteLine("[Desktop] Scroll xuống cuối trang để kích hoạt lazy-load...");
+                ScrollToBottomAndEnsureLazyContent(driver, TimeSpan.FromSeconds(15));
                 
-                // Đợi quảng cáo load với thời gian dài hơn
+                // Bước 2: Scroll ngược lại lên đầu trang một cách mượt mà để đảm bảo tất cả nội dung đã load
+                Console.WriteLine("[Desktop] Scroll ngược lại lên đầu trang...");
+                SmoothScrollToTop(driver);
+                
+                // Bước 3: Delay để đảm bảo tất cả dữ liệu (ảnh, quảng cáo, lazy content) đã load đầy đủ
+                Console.WriteLine("[Desktop] Đợi nội dung load đầy đủ...");
+                Thread.Sleep(2000);
+                
+                // Bước 4: Đợi quảng cáo load hoàn toàn
                 WaitForAdsLoaded(driver, TimeSpan.FromSeconds(12));
                 
-                // Delay thêm để đảm bảo tất cả banner quảng cáo đã render hoàn toàn
-                Thread.Sleep(2000);
+                // Bước 5: Delay thêm để đảm bảo tất cả banner quảng cáo đã render hoàn toàn
+                Thread.Sleep(1500);
+                
+                Console.WriteLine("[Desktop] Bắt đầu chụp màn hình...");
                 
                 int pageWidth = 1920;
                 int totalHeight = 3000;
@@ -241,6 +249,49 @@ namespace ConsummerScreenPageBot.Device
             {
                 ErrorWriter.WriteLog(LogPath, "ClearScreenshots", $"Desktop {hostLabel} => {ex}");
                 TelegramService.PushLogToTelegram($"Desktop ClearScreenshots Error - {hostLabel}", ex);
+            }
+        }
+
+        /// <summary>
+        /// Cuộn trang một cách mượt mà lên đầu trang để đảm bảo tất cả nội dung đã load
+        /// </summary>
+        private static void SmoothScrollToTop(IWebDriver driver)
+        {
+            var js = (IJavaScriptExecutor)driver;
+            try
+            {
+                // Lấy chiều cao trang
+                long totalHeight = 0;
+                try
+                {
+                    totalHeight = Convert.ToInt64(js.ExecuteScript("return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight) || 0;"));
+                }
+                catch { }
+
+                if (totalHeight <= 0) return;
+
+                // Scroll mượt mà lên đầu trang bằng cách chia thành nhiều bước nhỏ
+                const int scrollSteps = 10;
+                long stepSize = totalHeight / scrollSteps;
+                
+                for (int i = scrollSteps; i >= 0; i--)
+                {
+                    long scrollY = i * stepSize;
+                    try
+                    {
+                        js.ExecuteScript($"window.scrollTo(0, {scrollY});");
+                    }
+                    catch { }
+                    Thread.Sleep(150); // Delay nhỏ giữa mỗi bước scroll
+                }
+
+                // Đảm bảo đã về đầu trang
+                try { js.ExecuteScript("window.scrollTo(0, 0);"); } catch { }
+                Thread.Sleep(300); // Delay cuối cùng
+            }
+            catch (Exception ex)
+            {
+                ErrorWriter.WriteLog(LogPath, "SmoothScrollToTop", ex.ToString());
             }
         }
 

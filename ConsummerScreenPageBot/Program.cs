@@ -165,7 +165,7 @@ namespace ConsummerScreenPageBot
                             AutomaticRecoveryEnabled = true,
                             NetworkRecoveryInterval = TimeSpan.FromSeconds(5),    // Nếu mất kết nối RabbitMQ, thử kết nối lại sau mỗi 5 giây
                             //RequestedConnectionTimeout = TimeSpan.FromSeconds(30), // Thời gian timeout tối đa khi chờ thiết lập kết nối là 30 giây
-                            RequestedHeartbeat = TimeSpan.FromSeconds(30)          // Gửi tín hiệu heartbeat tới RabbitMQ mỗi 30 giây để kiểm tra kết nối còn sống
+                            //RequestedHeartbeat = TimeSpan.FromSeconds(30)          // Gửi tín hiệu heartbeat tới RabbitMQ mỗi 30 giây để kiểm tra kết nối còn sống
                         };
                         if (rabbit_use_ssl == "1" || rabbit_port == 5671)
                         {
