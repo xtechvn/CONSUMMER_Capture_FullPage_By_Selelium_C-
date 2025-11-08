@@ -206,13 +206,18 @@ namespace ConsummerScreenPageBot.Device
                             {
                                 var compressedBytes = File.ReadAllBytes(savePath);
                                 try { Console.WriteLine($"[Mobile Segment] Saved {Path.GetFileName(savePath)} ({compressedBytes.Length} bytes)"); } catch { }
-                                Program.TryPublishAnalyze(compressedBytes);
+                                // Truyền width và height của segment
+                                Program.TryPublishAnalyze(compressedBytes, seg.Width, seg.Height);
                             }
                             catch { }
                         }
                     }
                 }
                 try { Console.WriteLine($"[Mobile Segment] Done host={hostLabel}"); } catch { }
+                
+                // Sau khi chụp segment xong, xử lý tất cả iframe và push vào queue
+                Console.WriteLine("[Mobile] Bắt đầu xử lý iframe sau khi chụp segment...");
+                Program.ProcessIframesAndPushToQueue(driver, hostLabel);
             }
             catch (Exception ex)
             {

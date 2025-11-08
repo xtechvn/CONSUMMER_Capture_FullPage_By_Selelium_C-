@@ -62,6 +62,10 @@ namespace ConsummerScreenPageBot.Device
 
             // Chụp segment chia đều toàn bộ chiều dài trang
             CaptureSegmentScreenshots(driver, host, segment_page, jpegQuality);
+
+            // Sau khi chụp segment xong, xử lý tất cả iframe và push vào queue
+                Console.WriteLine("[Desktop] Bắt đầu xử lý iframe sau khi chụp segment...");
+                Program.ProcessIframesAndPushToQueue(driver, host);
         }
 
         /// <summary>
@@ -209,13 +213,16 @@ namespace ConsummerScreenPageBot.Device
                             {
                                 var compressedBytes = File.ReadAllBytes(savePath);
                                 try { Console.WriteLine($"[Desktop Segment] Saved {Path.GetFileName(savePath)} ({compressedBytes.Length} bytes)"); } catch { }
-                                Program.TryPublishAnalyze(compressedBytes);
+                                // Truyền width và height của segment
+                                Program.TryPublishAnalyze(compressedBytes, seg.Width, seg.Height);
                             }
                             catch { }
                         }
                     }
                 }
                 try { Console.WriteLine($"[Desktop Segment] Done host={hostLabel}"); } catch { }
+                
+                
             }
             catch (Exception ex)
             {

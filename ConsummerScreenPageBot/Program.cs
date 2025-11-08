@@ -10,6 +10,7 @@ using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using System.Configuration;
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.Win32;
 using ConsummerScreenPageBot.Models;
 using ConsummerScreenPageBot.Utils;
@@ -17,6 +18,7 @@ using ConsummerScreenPageBot.Device;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using SixLabors.ImageSharp.Formats.Jpeg;
 
 namespace ConsummerScreenPageBot
 {
@@ -25,7 +27,8 @@ namespace ConsummerScreenPageBot
         private static string startupPath = AppDomain.CurrentDomain.BaseDirectory.Replace(@"\bin\Debug\net8.0", @"\");
         public static string rabbit_queue_name = ConfigurationManager.AppSettings["RabbitQueue"] ?? "";
         public static string RabbitQueueAnalyze = ConfigurationManager.AppSettings["RabbitQueueAnalyze"] ?? "";
-        
+        public static string RabbitQueueAnalyzeSingleBanner = ConfigurationManager.AppSettings["RabbitQueueAnalyzeSingleBanner"] ?? "";
+
         public static string rabbit_host = ConfigurationManager.AppSettings["RabbitHost"] ?? "";
         public static string rabbit_vhost = ConfigurationManager.AppSettings["RabbitVHost"] ?? "";
         public static int rabbit_port = Convert.ToInt32(ConfigurationManager.AppSettings["RabbitPort"] ?? "5672");
@@ -75,32 +78,60 @@ namespace ConsummerScreenPageBot
                 if (!string.IsNullOrWhiteSpace(chromeBinary) && File.Exists(chromeBinary))
                 {
                     chrome_option.BinaryLocation = chromeBinary;
+                    Console.WriteLine($"[Chrome] Using Chrome binary: {chromeBinary}");
                 }
                 else
                 {
                     // Dòng bổ sung, cảnh báo khi Chrome không tìm thấy
                     Console.WriteLine("Warning: Chrome binary NOT found. Please check Chrome is installed or adjust the path.");
+                    Console.WriteLine($"[Chrome] Attempting to use system default Chrome...");
+                    // Không set BinaryLocation, để ChromeDriver tự tìm
                 }
 
                 // Fix 2: Cấu hình chống crash headless/windowless môi trường server/docker
                 if (is_headless == "1")
                 {
+                    Console.WriteLine("[Chrome] Configuring headless mode...");
                     chrome_option.AddArgument("--headless=new");
                     chrome_option.AddArgument("--disable-gpu");
                     chrome_option.AddArgument("--window-size=1920,1080");
                     chrome_option.AddArgument("--disable-software-rasterizer");
                     chrome_option.AddArgument("--no-sandbox");
                     chrome_option.AddArgument("--disable-dev-shm-usage");
+                    // Thêm options cho macOS
+                    if (OperatingSystem.IsMacOS())
+                    {
+                        Console.WriteLine("[Chrome] Adding macOS-specific options...");
+                        chrome_option.AddArgument("--disable-setuid-sandbox");
+                        chrome_option.AddArgument("--disable-web-security");
+                        chrome_option.AddArgument("--disable-features=VizDisplayCompositor");
+                        chrome_option.AddArgument("--disable-background-timer-throttling");
+                        chrome_option.AddArgument("--disable-backgrounding-occluded-windows");
+                        chrome_option.AddArgument("--disable-renderer-backgrounding");
+                        // Thêm option để tránh ProcessSingleton lock conflict
+                        chrome_option.AddArgument("--remote-debugging-pipe");
+                    }
                 }
                 else
                 {
                     chrome_option.AddArgument("--start-maximized"); // set full man hinh  
                 }
 
-                // Use isolated user profile (giữ nguyên)
-                var userDataDir = Path.Combine(startupPath, "chrome-profile");
+                // Use isolated user profile với unique ID để tránh lock conflict
+                var userDataDir = Path.Combine(startupPath, "chrome-profile", Guid.NewGuid().ToString("N").Substring(0, 8));
                 if (!Directory.Exists(userDataDir)) Directory.CreateDirectory(userDataDir);
                 chrome_option.AddArgument($"--user-data-dir={userDataDir}");
+                
+                // Xóa lock file nếu tồn tại để tránh conflict
+                try
+                {
+                    var lockFile = Path.Combine(userDataDir, "SingletonLock");
+                    if (File.Exists(lockFile))
+                    {
+                        File.Delete(lockFile);
+                    }
+                }
+                catch { }
 
                 // Các option giả lập người dùng
                 chrome_option.AddArgument("--disable-blink-features=AutomationControlled");
@@ -151,8 +182,10 @@ namespace ConsummerScreenPageBot
 
                 try
                 {
+                    Console.WriteLine("[Chrome] Starting ChromeDriver...");
                     using (var browers = new ChromeDriver(service, chrome_option, TimeSpan.FromMinutes(3)))
-                    {  
+                    {
+                        Console.WriteLine("[Chrome] ChromeDriver started successfully!");  
                          
                         #region WAITING QUEUE
                         var factory = new ConnectionFactory()
@@ -723,7 +756,9 @@ namespace ConsummerScreenPageBot
                             {
                                 var compressedBytes = File.ReadAllBytes(savePath);
                                 try { Console.WriteLine($"[Segment] Saved {Path.GetFileName(savePath)} ({compressedBytes.Length} bytes)"); } catch { }
-                                TryPublishAnalyze(compressedBytes);
+                                // Truyền width và height của segment
+                                try { Console.WriteLine($"[Segment] Debug - seg.Width: {seg.Width}, seg.Height: {seg.Height}"); } catch { }
+                                TryPublishAnalyze(compressedBytes, seg.Width, seg.Height);
                             }
                             catch { }
                         }
@@ -863,6 +898,438 @@ namespace ConsummerScreenPageBot
         }
 
         /// <summary>
+        /// Kiểm tra link có hợp lệ không (phải chứa https:// hoặc http://)
+        /// 
+        /// Tham số:
+        /// - link: Link cần kiểm tra
+        /// 
+        /// Trả về: true nếu link hợp lệ, false nếu không
+        /// </summary>
+        private static bool IsValidHttpLink(string link)
+        {
+            if (string.IsNullOrWhiteSpace(link))
+            {
+                return false;
+            }
+            
+            // Loại bỏ khoảng trắng đầu cuối
+            link = link.Trim();
+            
+            // Regex pattern để kiểm tra link HTTP/HTTPS hợp lệ
+            // Phải bắt đầu với http:// hoặc https://
+            var pattern = @"^https?://[^\s]+";
+            var regex = new Regex(pattern, RegexOptions.IgnoreCase);
+            
+            return regex.IsMatch(link);
+        }
+        
+        /// <summary>
+        /// Normalize URL: loại bỏ fragment, normalize path
+        /// </summary>
+        private static string NormalizeUrl(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                return url;
+            }
+            
+            try
+            {
+                var uri = new Uri(url);
+                // Loại bỏ fragment (#...)
+                var normalized = $"{uri.Scheme}://{uri.Host}{uri.AbsolutePath}{uri.Query}";
+                return normalized;
+            }
+            catch
+            {
+                // Nếu không parse được URL, trả về nguyên bản
+                return url.Trim();
+            }
+        }
+        
+        /// <summary>
+        /// Thu thập tất cả links trên trang, phân loại quảng cáo và push vào RabbitMQ
+        /// 
+        /// Cách thức hoạt động:
+        /// 1. Thu thập tất cả links (<a href>) trên trang
+        /// 2. Phân tích từng link để xác định có phải quảng cáo không:
+        ///    - Phân tích DOM: class/id chứa "ad", text "Quảng cáo", iframe ads, banner images
+        ///    - Phân tích Network: domain quảng cáo (doubleclick.net, googlesyndication.com, ...)
+        ///    - Heuristic: URL pattern (utm_source, adclick, ...), vị trí, kích thước
+        /// 3. Push các link quảng cáo vào queue RabbitQueueAnalyzeSingleBanner với JSON format:
+        ///    { "link_click_banner": "{link}", "screenshot_base64": "" }
+        /// 
+        /// Tham số:
+        /// - driver: WebDriver
+        /// - hostLabel: Hostname để log
+        /// </summary>
+        public static void ProcessIframesAndPushToQueue(IWebDriver driver, string hostLabel)
+        {
+            try
+            {
+                Console.WriteLine($"[AdLink] Bắt đầu thu thập links từ HTML source cho host={hostLabel}");
+                
+                // Lấy HTML source từ driver
+                var htmlSource = driver.PageSource;
+                Console.WriteLine($"[AdLink] Debug - HTML source length: {htmlSource?.Length ?? 0} characters");
+                
+                if (string.IsNullOrWhiteSpace(htmlSource))
+                {
+                    Console.WriteLine($"[AdLink] HTML source rỗng, không thể parse links");
+                    return;
+                }
+                
+                // Parse links từ HTML bằng C#
+                var allLinks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                
+                // 1. Tìm tất cả href trong <a> tags
+                var hrefPattern = @"<a[^>]+href\s*=\s*[""']([^""']+)[""'][^>]*>";
+                var hrefMatches = Regex.Matches(htmlSource, hrefPattern, RegexOptions.IgnoreCase);
+                Console.WriteLine($"[AdLink] Debug - Tìm thấy {hrefMatches.Count} <a href> tags");
+                foreach (Match match in hrefMatches)
+                {
+                    if (match.Groups.Count > 1)
+                    {
+                        var href = match.Groups[1].Value.Trim();
+                        if (IsValidHttpLink(href))
+                        {
+                            allLinks.Add(NormalizeUrl(href));
+                        }
+                    }
+                }
+                
+                // 2. Tìm tất cả src trong <iframe> và <frame> tags
+                var iframePattern = @"<(?:iframe|frame)[^>]+src\s*=\s*[""']([^""']+)[""'][^>]*>";
+                var iframeMatches = Regex.Matches(htmlSource, iframePattern, RegexOptions.IgnoreCase);
+                Console.WriteLine($"[AdLink] Debug - Tìm thấy {iframeMatches.Count} <iframe/frame src> tags");
+                foreach (Match match in iframeMatches)
+                {
+                    if (match.Groups.Count > 1)
+                    {
+                        var src = match.Groups[1].Value.Trim();
+                        if (IsValidHttpLink(src))
+                        {
+                            allLinks.Add(NormalizeUrl(src));
+                        }
+                    }
+                }
+                
+                // 3. Tìm data-href và data-url
+                var dataHrefPattern = @"data-href\s*=\s*[""']([^""']+)[""']";
+                var dataHrefMatches = Regex.Matches(htmlSource, dataHrefPattern, RegexOptions.IgnoreCase);
+                Console.WriteLine($"[AdLink] Debug - Tìm thấy {dataHrefMatches.Count} data-href attributes");
+                foreach (Match match in dataHrefMatches)
+                {
+                    if (match.Groups.Count > 1)
+                    {
+                        var href = match.Groups[1].Value.Trim();
+                        if (IsValidHttpLink(href))
+                        {
+                            allLinks.Add(NormalizeUrl(href));
+                        }
+                    }
+                }
+                
+                var dataUrlPattern = @"data-url\s*=\s*[""']([^""']+)[""']";
+                var dataUrlMatches = Regex.Matches(htmlSource, dataUrlPattern, RegexOptions.IgnoreCase);
+                Console.WriteLine($"[AdLink] Debug - Tìm thấy {dataUrlMatches.Count} data-url attributes");
+                foreach (Match match in dataUrlMatches)
+                {
+                    if (match.Groups.Count > 1)
+                    {
+                        var url = match.Groups[1].Value.Trim();
+                        if (IsValidHttpLink(url))
+                        {
+                            allLinks.Add(NormalizeUrl(url));
+                        }
+                    }
+                }
+                
+                // 4. Tìm URLs trong onclick handlers
+                var onclickPattern = @"onclick\s*=\s*[""']([^""']+)[""']";
+                var onclickMatches = Regex.Matches(htmlSource, onclickPattern, RegexOptions.IgnoreCase);
+                Console.WriteLine($"[AdLink] Debug - Tìm thấy {onclickMatches.Count} onclick handlers");
+                foreach (Match match in onclickMatches)
+                {
+                    if (match.Groups.Count > 1)
+                    {
+                        var onclickContent = match.Groups[1].Value;
+                        // Tìm URLs trong onclick content
+                        var urlInOnclick = Regex.Matches(onclickContent, @"https?://[^\s'""\)]+", RegexOptions.IgnoreCase);
+                        foreach (Match urlMatch in urlInOnclick)
+                        {
+                            var url = urlMatch.Value.Trim();
+                            if (IsValidHttpLink(url))
+                            {
+                                allLinks.Add(NormalizeUrl(url));
+                            }
+                        }
+                    }
+                }
+                
+                Console.WriteLine($"[AdLink] Tổng cộng thu thập được {allLinks.Count} link(s) HTTP/HTTPS hợp lệ");
+                
+                // Phân loại link quảng cáo bằng C#
+                var adDomains = new[]
+                {
+                    "doubleclick.net", "googlesyndication.com", "adservice.google.com",
+                    "adclick.g.doubleclick.net", "googleadservices.com",
+                    "adsystem.amazon.com", "amazon-adsystem.com",
+                    "ads.yahoo.com", "taboola.com", "outbrain.com", "adnxs.com",
+                    "criteo.com", "adsrvr.org", "advertising.com", "adtech.com",
+                    "adform.net", "rubiconproject.com", "openx.net", "adsafeprotected.com",
+                };
+                
+                string currentDomain = string.Empty;
+                try { currentDomain = new Uri(driver.Url).Host; } catch { currentDomain = hostLabel ?? string.Empty; }
+                string CleanHost(string h) => string.IsNullOrWhiteSpace(h) ? string.Empty : h.Replace("www.", string.Empty, StringComparison.OrdinalIgnoreCase);
+                currentDomain = CleanHost(currentDomain);
+                
+                int ClassifyScore(string href)
+                {
+                    int score = 0;
+                    try
+                    {
+                        var uri = new Uri(href);
+                        var host = CleanHost(uri.Host).ToLowerInvariant();
+                        // Ad domain exact/subdomain
+                        foreach (var ad in adDomains)
+                        {
+                            if (host == ad || host.EndsWith("." + ad, StringComparison.OrdinalIgnoreCase))
+                            {
+                                score += 5; break;
+                            }
+                        }
+                        // URL patterns
+                        var urlLower = href.ToLowerInvariant();
+                        if (urlLower.Contains("adclick") || urlLower.Contains("utm_source=ad") ||
+                            urlLower.Contains("utm_medium=ad") || urlLower.Contains("click?") ||
+                            urlLower.Contains("impression") || urlLower.Contains("gclid") ||
+                            urlLower.Contains("fbclid") || urlLower.Contains("ref=ad") ||
+                            urlLower.Contains("promo") || urlLower.Contains("sponsor"))
+                        {
+                            score += 3;
+                        }
+                        // Path hints
+                        if (uri.AbsolutePath.Contains("banner", StringComparison.OrdinalIgnoreCase) ||
+                            uri.AbsolutePath.Contains("ad", StringComparison.OrdinalIgnoreCase))
+                        {
+                            score += 1;
+                        }
+                        // External domain
+                        var linkDomain = host;
+                        if (!string.IsNullOrEmpty(currentDomain) &&
+                            !linkDomain.Equals(currentDomain, StringComparison.OrdinalIgnoreCase) &&
+                            !linkDomain.Contains(currentDomain, StringComparison.OrdinalIgnoreCase) &&
+                            !currentDomain.Contains(linkDomain, StringComparison.OrdinalIgnoreCase))
+                        {
+                            score += 1;
+                        }
+                    }
+                    catch { }
+                    return score;
+                }
+                
+                var adOnly = new List<(string href,int score)>();
+                foreach (var href in allLinks)
+                {
+                    int s = ClassifyScore(href);
+                    if (s >= 2) adOnly.Add((href,s));
+                }
+                
+                Console.WriteLine($"[AdLink] Sau phân loại: {adOnly.Count} / {allLinks.Count} link có khả năng quảng cáo (>=2 điểm)");
+                
+                // Lấy job params từ RabbitQueue gốc để merge vào payload
+                var jobParamsSnapshot = lastJobParams; // tránh race condition
+                
+                // Push chỉ link quảng cáo
+                int processedCount = 0;
+                foreach (var item in adOnly)
+                {
+                    var href = item.href;
+                    try
+                    {
+                        PushIframeToQueue(href, "", jobParamsSnapshot);
+                        processedCount++;
+                        Console.WriteLine($"[AdLink] Pushed {processedCount}/{adOnly.Count} - score={item.score} - {href.Substring(0, Math.Min(80, href.Length))}...");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[AdLink] Lỗi khi push link: {ex.Message}");
+                        ErrorWriter.WriteLog(LogPath, "ProcessAdLink", $"{hostLabel} => {href} => {ex}");
+                    }
+                }
+                
+                Console.WriteLine($"[AdLink] Hoàn thành xử lý {processedCount} link(s) quảng cáo cho host={hostLabel}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AdLink] Lỗi xử lý links: {ex.Message}");
+                ErrorWriter.WriteLog(LogPath, "ProcessIframesAndPushToQueue", $"{hostLabel} => {ex}");
+                TelegramService.PushLogToTelegram($"ProcessIframesAndPushToQueue Error - {hostLabel}", ex);
+            }
+        }
+        
+        /// <summary>
+        /// Push link iframe vào RabbitMQ queue RabbitQueueAnalyzeSingleBanner
+        /// 
+        /// Cách thức hoạt động:
+        /// 1. Kiểm tra queue đã được cấu hình
+        /// 2. Tạo JSON payload: 
+        ///    - Merge tất cả thông tin từ job params gốc (link_web, slice, quanlity_image, device, ...)
+        ///    - Thêm "link_click_banner": "{link}"
+        ///    - Thêm "screenshot_base64": "" (luôn rỗng)
+        /// 3. Đảm bảo kết nối RabbitMQ đã sẵn sàng
+        /// 4. Push message lên queue với persistent = true
+        /// 
+        /// Tham số:
+        /// - linkClick: Link click của iframe/quảng cáo
+        /// - screenshotBase64: Luôn để rỗng (không chụp ảnh nữa)
+        /// - jobParamsSnapshot: Thông tin từ job gốc (RabbitQueue) để merge vào payload
+        /// </summary>
+        private static void PushIframeToQueue(string linkClick, string screenshotBase64, JObject? jobParamsSnapshot = null)
+        {
+            try
+            {
+                // Đọc lại config từ App.config để đảm bảo có giá trị mới nhất
+                var queueName = ConfigurationManager.AppSettings["RabbitQueueAnalyzeSingleBanner"] ?? "";
+                if (string.IsNullOrWhiteSpace(queueName))
+                {
+                    Console.WriteLine($"[Iframe] RabbitQueueAnalyzeSingleBanner chưa được cấu hình. Config value: '{queueName}', Static value: '{RabbitQueueAnalyzeSingleBanner}'");
+                    return;
+                }
+                
+                // Sử dụng giá trị từ config thay vì static variable để đảm bảo có giá trị mới nhất
+                var targetQueue = queueName;
+                
+                if (string.IsNullOrWhiteSpace(linkClick))
+                {
+                    Console.WriteLine("[Iframe] Link click rỗng, bỏ qua");
+                    return;
+                }
+                
+                // Tạo JSON payload: merge tất cả thông tin từ job params gốc
+                JObject mergedPayload;
+                if (jobParamsSnapshot != null)
+                {
+                    try 
+                    { 
+                        mergedPayload = (JObject)jobParamsSnapshot.DeepClone(); 
+                    }
+                    catch 
+                    { 
+                        mergedPayload = new JObject(); 
+                    }
+                }
+                else
+                {
+                    mergedPayload = new JObject();
+                }
+                
+                // Thêm link_click_banner và screenshot_base64 (ghi đè nếu có trong job params)
+                mergedPayload["link_click_banner"] = linkClick ?? "";
+                mergedPayload["screenshot_base64"] = ""; // Luôn để rỗng
+                
+                var jsonPayload = mergedPayload.ToString(Newtonsoft.Json.Formatting.None);
+                var body = Encoding.UTF8.GetBytes(jsonPayload);
+                
+                // Debug: Log payload để kiểm tra
+                try
+                {
+                    var payloadKeys = string.Join(", ", mergedPayload.Properties().Select(p => p.Name));
+                    Console.WriteLine($"[Iframe] Debug - Payload keys: {payloadKeys}");
+                }
+                catch { }
+                
+                // Đảm bảo kết nối RabbitMQ sẵn sàng với queue name từ config
+                EnsureIframePublisherReady(targetQueue);
+                
+                if (iframeChannel == null || !iframeChannel.IsOpen)
+                {
+                    Console.WriteLine("[Iframe] Không thể kết nối tới RabbitMQ");
+                    return;
+                }
+                
+                var props = iframeChannel.CreateBasicProperties();
+                props.Persistent = true;
+                
+                iframeChannel.BasicPublish(exchange: "",
+                                          routingKey: targetQueue,
+                                          basicProperties: props,
+                                          body: body);
+                
+                Console.WriteLine($"[Iframe] Đã push vào queue '{targetQueue}' - Link: {linkClick}, Size: {body.Length} bytes");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Iframe] Lỗi push vào queue: {ex.Message}");
+                ErrorWriter.WriteLog(LogPath, "PushIframeToQueue", ex.ToString());
+            }
+        }
+        
+        // Publisher for iframe queue
+        private static readonly object iframePubLock = new object();
+        private static IConnection? iframeConnection;
+        private static IModel? iframeChannel;
+        
+        /// <summary>
+        /// Đảm bảo kết nối RabbitMQ cho iframe publisher đã sẵn sàng
+        /// </summary>
+        private static void EnsureIframePublisherReady(string queueName)
+        {
+            if (iframeChannel != null && iframeChannel.IsOpen) return;
+            
+            lock (iframePubLock)
+            {
+                try
+                {
+                    if (iframeChannel != null && iframeChannel.IsOpen) return;
+                    
+                    iframeConnection?.Dispose();
+                    iframeChannel?.Dispose();
+                    
+                    var factory = new ConnectionFactory()
+                    {
+                        HostName = rabbit_host,
+                        UserName = rabbit_username,
+                        Password = rabbit_password,
+                        VirtualHost = string.IsNullOrWhiteSpace(rabbit_vhost) ? "/" : rabbit_vhost,
+                        Port = rabbit_port,
+                        AutomaticRecoveryEnabled = true,
+                        NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
+                        RequestedConnectionTimeout = TimeSpan.FromSeconds(30),
+                        RequestedHeartbeat = TimeSpan.FromSeconds(30)
+                    };
+                    
+                    if (rabbit_use_ssl == "1" || rabbit_port == 5671)
+                    {
+                        factory.Ssl = new SslOption
+                        {
+                            Enabled = true,
+                            ServerName = rabbit_host,
+                            AcceptablePolicyErrors = System.Net.Security.SslPolicyErrors.None
+                        };
+                    }
+                    
+                    iframeConnection = factory.CreateConnection();
+                    iframeChannel = iframeConnection.CreateModel();
+                    iframeChannel.QueueDeclare(queue: queueName,
+                                              durable: true,
+                                              exclusive: false,
+                                              autoDelete: false,
+                                              arguments: null);
+                    
+                    Console.WriteLine($"[Iframe] Đã kết nối RabbitMQ và declare queue: '{queueName}'");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Iframe] Lỗi kết nối RabbitMQ: {ex.Message}");
+                    ErrorWriter.WriteLog(LogPath, "EnsureIframePublisher", ex.ToString());
+                }
+            }
+        }
+
+        /// <summary>
         /// Gửi ảnh đã chụp lên RabbitMQ queue để AI (Gemini) phân tích
         /// 
         /// Cách thức hoạt động:
@@ -872,6 +1339,7 @@ namespace ConsummerScreenPageBot
         /// 4. Build payload chứa:
         ///    - Ảnh (dạng base64 hoặc raw bytes tùy theo analyze_publish_raw)
         ///    - Thông tin từ job gốc (link_web, slice, quanlity_image, ...)
+        ///    - width và height của ảnh
         /// 5. Gửi message lên queue RabbitQueueAnalyze với persistent = true (không mất khi server restart)
         /// 6. Log kích thước message đã gửi
         /// 
@@ -879,8 +1347,10 @@ namespace ConsummerScreenPageBot
         /// 
         /// Tham số:
         /// - imageBytes: Mảng byte chứa dữ liệu ảnh đã nén
+        /// - width: Chiều rộng của ảnh (optional)
+        /// - height: Chiều cao của ảnh (optional)
         /// </summary>
-        public static void TryPublishAnalyze(byte[] imageBytes)
+        public static void TryPublishAnalyze(byte[] imageBytes, int? width = null, int? height = null)
         {
             try
             {
@@ -890,7 +1360,15 @@ namespace ConsummerScreenPageBot
                 if (analyzeChannel == null) return;
 
                 var snapshot = lastJobParams; // tránh race
-                var body = AnalyzePayloadBuilder.BuildAnalyzeBody(imageBytes, snapshot, analyze_publish_raw);
+                
+                // Debug: Log width và height trước khi build payload
+                try
+                {
+                    Console.WriteLine($"[TryPublishAnalyze] Debug - width: {(width.HasValue ? width.Value.ToString() : "null")}, height: {(height.HasValue ? height.Value.ToString() : "null")}");
+                }
+                catch { }
+                
+                var body = AnalyzePayloadBuilder.BuildAnalyzeBody(imageBytes, snapshot, analyze_publish_raw, width, height);
 
                 var props = analyzeChannel.CreateBasicProperties();
                 props.Persistent = true;
@@ -899,7 +1377,20 @@ namespace ConsummerScreenPageBot
                                             routingKey: RabbitQueueAnalyze,
                                             basicProperties: props,
                                             body: body);
-                try { Console.WriteLine($"[Analyze] Published {(analyze_publish_raw=="1"?imageBytes.Length:body.Length)} bytes to queue '{RabbitQueueAnalyze}' (raw={analyze_publish_raw})"); } catch { }
+                
+                // Log thông tin payload
+                if (analyze_publish_raw != "1" && width.HasValue && height.HasValue)
+                {
+                    try 
+                    { 
+                        Console.WriteLine($"[Analyze] Published {body.Length} bytes to queue '{RabbitQueueAnalyze}' - Width: {width.Value}, Height: {height.Value}"); 
+                    } 
+                    catch { }
+                }
+                else
+                {
+                    try { Console.WriteLine($"[Analyze] Published {(analyze_publish_raw=="1"?imageBytes.Length:body.Length)} bytes to queue '{RabbitQueueAnalyze}' (raw={analyze_publish_raw})"); } catch { }
+                }
             }
             catch (Exception ex)
             {
@@ -1436,12 +1927,38 @@ namespace ConsummerScreenPageBot
                     var macCandidates = new[]
                     {
                         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-                        "/Applications/Chromium.app/Contents/MacOS/Chromium"
+                        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+                        "/Users/lecuong/Desktop/Google Chrome.app/Contents/MacOS/Google Chrome"
                     };
                     foreach (var p in macCandidates)
                     {
                         if (File.Exists(p)) return p;
                     }
+                    
+                    // Tìm Chrome for Testing trong cache (Selenium tự download)
+                    try
+                    {
+                        var cacheBase = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "selenium", "chrome");
+                        if (Directory.Exists(cacheBase))
+                        {
+                            // Tìm tất cả các version trong cache
+                            var platformDirs = Directory.GetDirectories(cacheBase);
+                            foreach (var platformDir in platformDirs)
+                            {
+                                var versionDirs = Directory.GetDirectories(platformDir);
+                                foreach (var versionDir in versionDirs)
+                                {
+                                    var chromePath = Path.Combine(versionDir, "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing");
+                                    if (File.Exists(chromePath))
+                                    {
+                                        return chromePath;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                    
                     return string.Empty;
                 }
 

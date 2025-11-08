@@ -240,7 +240,8 @@ namespace ConsummerScreenPageBot
 						{
 							var bytes = File.ReadAllBytes(savePath);
 							try { Console.WriteLine($"[AdCapture] Publish analyze: {hostLabel} -> {Path.GetFileName(savePath)} ({bytes.Length} bytes)"); } catch { }
-							Program.TryPublishAnalyze(bytes);
+							// Truyền width và height của ảnh đã crop
+							Program.TryPublishAnalyze(bytes, crop.Width, crop.Height);
 						}
 						catch { }
 					}
