@@ -1,3 +1,5 @@
-ConsummerScreenPageBot/logs/
-ConsummerScreenPageBot/logs/
-ConsummerScreenPageBot/logs/
+.vs/
+.vscode/
+bin/
+obj/
+chrome-profile/

@@ -64,8 +64,8 @@ namespace ConsummerScreenPageBot.Device
             CaptureSegmentScreenshots(driver, host, segment_page, jpegQuality);
 
             // Sau khi chụp segment xong, xử lý tất cả iframe và push vào queue
-                Console.WriteLine("[Desktop] Bắt đầu xử lý iframe sau khi chụp segment...");
-                Program.ProcessIframesAndPushToQueue(driver, host);
+               // Console.WriteLine("[Desktop] Bắt đầu xử lý iframe sau khi chụp segment...");
+                //Program.ProcessIframesAndPushToQueue(driver, host);
         }
 
         /// <summary>
