@@ -25,10 +25,14 @@ namespace ConsummerScreenPageBot
     class Program
     {
         private static string startupPath = AppDomain.CurrentDomain.BaseDirectory.Replace(@"\bin\Debug\net8.0", @"\");
-        public static string rabbit_queue_name = ConfigurationManager.AppSettings["RabbitQueue"] ?? "";
-        public static string RabbitQueueAnalyze = ConfigurationManager.AppSettings["RabbitQueueAnalyze"] ?? "";
-        public static string RabbitQueueAnalyzeSingleBanner = ConfigurationManager.AppSettings["RabbitQueueAnalyzeSingleBanner"] ?? "";
 
+        // Queue name này chứa các link website cần screen
+        public static string rabbit_queue_name = ConfigurationManager.AppSettings["RabbitQueue"] ?? "";
+        // Queue name này chứa ảnh base64 để xử lý convert text
+        public static string RabbitQueueAnalyze = ConfigurationManager.AppSettings["RabbitQueueImageAnalyze"] ?? "";
+       
+        // Queue name này dùng để nhận dữ liệu từ link click banner
+        public static string RabbitQueueScreenLink = ConfigurationManager.AppSettings["RabbitQueueScreenLink"] ?? "";
         public static string rabbit_host = ConfigurationManager.AppSettings["RabbitHost"] ?? "";
         public static string rabbit_vhost = ConfigurationManager.AppSettings["RabbitVHost"] ?? "";
         public static int rabbit_port = Convert.ToInt32(ConfigurationManager.AppSettings["RabbitPort"] ?? "5672");
@@ -253,7 +257,11 @@ namespace ConsummerScreenPageBot
                                     // Device: 1:PC, 2:Mobile (có thể là "1", "2", hoặc "1,2")
                                     string device = jobj["device"] != null ? jobj["device"].ToObject<string>() : "1";
                                     
+                                    // Queue name này sẽ phân biệt job xử lý hình ảnh
+                                    //  dùng để nhận dữ liệu ảnh base64 để phân tích text từ ảnh Banner. NÓ được gán từ dữ liệu trên n8n
+                                    RabbitQueueAnalyze = jobj["queue_execute_ocr_image"] != null ? jobj["queue_execute_ocr_image"].ToObject<string>() : "QUEUE_PROCESS_IMAGE_ANALYZE" ;
                                     // Lưu context params để gộp vào payload RabbitQueueAnalyze
+
                                     try { 
                                         lastJobParams = (JObject)jobj.DeepClone(); 
                                     } catch {
@@ -496,7 +504,7 @@ namespace ConsummerScreenPageBot
         /// 2. Trong khoảng thời gian maxWait:
         ///    - Lắc scroll nhẹ (scroll 40px xuống rồi quay lại 0) để kích hoạt mutation observer
         ///    - Chạy JavaScript để đếm số lượng quảng cáo hiển thị:
-        ///      * Tìm các selector: header banner, #banner_top, .gpt-ad, iframe, ...
+        ///      * Tìm các selector: header banner, #banner_top, .gpt-ad, 1, ...
         ///      * Chỉ tính các quảng cáo có kích thước >= 120x30px và nằm trong vùng top (y < 900px)
         ///    - Nếu số lượng quảng cáo ổn định trong 2 lần kiểm tra liên tiếp => thoát
         ///    - Nếu không tìm thấy quảng cáo => đợi 220ms rồi kiểm tra lại
@@ -967,6 +975,12 @@ namespace ConsummerScreenPageBot
         {
             try
             {
+                // Kiểm tra nếu RabbitQueueScreenLink chứa "NO_RUN" thì bỏ qua hàm này
+                if (!string.IsNullOrWhiteSpace(RabbitQueueScreenLink) && RabbitQueueScreenLink.Contains("NO_RUN", StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine("[AdLink] RabbitQueueScreenLink có chứa 'NO_RUN', bỏ qua ProcessIframesAndPushToQueue.");
+                    return;
+                }
                 Console.WriteLine($"[AdLink] Bắt đầu thu thập links từ HTML source cho host={hostLabel}");
                 
                 // Lấy HTML source từ driver
@@ -982,10 +996,10 @@ namespace ConsummerScreenPageBot
                 // Parse links từ HTML bằng C#
                 var allLinks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 
-                // 1. Tìm tất cả href trong <a> tags
-                var hrefPattern = @"<a[^>]+href\s*=\s*[""']([^""']+)[""'][^>]*>";
+                // 1. Tìm tất cả href trong <a> tags với target="_blank"
+                var hrefPattern = @"<a(?=[^>]*\btarget\s*=\s*[""']?_blank[""']?)[^>]+href\s*=\s*[""']([^""']+)[""'][^>]*>";
                 var hrefMatches = Regex.Matches(htmlSource, hrefPattern, RegexOptions.IgnoreCase);
-                Console.WriteLine($"[AdLink] Debug - Tìm thấy {hrefMatches.Count} <a href> tags");
+                Console.WriteLine($"[AdLink] Debug - Tìm thấy {hrefMatches.Count} <a href target=\"_blank\"> tags");
                 foreach (Match match in hrefMatches)
                 {
                     if (match.Groups.Count > 1)
@@ -1191,16 +1205,9 @@ namespace ConsummerScreenPageBot
         {
             try
             {
-                // Đọc lại config từ App.config để đảm bảo có giá trị mới nhất
-                var queueName = ConfigurationManager.AppSettings["RabbitQueueAnalyzeSingleBanner"] ?? "";
-                if (string.IsNullOrWhiteSpace(queueName))
-                {
-                    Console.WriteLine($"[Iframe] RabbitQueueAnalyzeSingleBanner chưa được cấu hình. Config value: '{queueName}', Static value: '{RabbitQueueAnalyzeSingleBanner}'");
-                    return;
-                }
+            
                 
-                // Sử dụng giá trị từ config thay vì static variable để đảm bảo có giá trị mới nhất
-                var targetQueue = queueName;
+                var targetQueue = RabbitQueueScreenLink; // Queue name này dùng để nhận dữ liệu từ link click banner
                 
                 if (string.IsNullOrWhiteSpace(linkClick))
                 {
