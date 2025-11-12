@@ -247,8 +247,8 @@ namespace ConsummerScreenPageBot
                                     int segment_page = 10;
                                     var jobj = JObject.Parse(message);
 
-                                    // Link web can chup
-                                    siteUrl = jobj["link_web"]?.ToString() ?? "";
+                                    // Link web can chup: screen_banner: chụp banner , link_click_banner: chụp trang đích sau khi click banner
+                                    siteUrl = task_bot == "screen_banner" ? jobj["link_web"]?.ToString() : jobj["link_click_banner"].ToString();
 
                                     // So luong segment chia trang de gui cho GEMINI phan tich hinh anh
                                     segment_page = jobj["slice"] != null ? jobj["slice"].ToObject<int>() : 5;
