@@ -257,10 +257,7 @@ namespace ConsummerScreenPageBot
                                     // Device: 1:PC, 2:Mobile (có thể là "1", "2", hoặc "1,2")
                                     string device = jobj["device"] != null ? jobj["device"].ToObject<string>() : "1";
                                     
-                                    // Queue name này sẽ phân biệt job xử lý hình ảnh
-                                    //  dùng để nhận dữ liệu ảnh base64 để phân tích text từ ảnh Banner. NÓ được gán từ dữ liệu trên n8n
-                                    RabbitQueueAnalyze = jobj["queue_execute_ocr_image"] != null ? jobj["queue_execute_ocr_image"].ToObject<string>() : "QUEUE_PROCESS_IMAGE_ANALYZE" ;
-                                    // Lưu context params để gộp vào payload RabbitQueueAnalyze
+                                    
 
                                     try { 
                                         lastJobParams = (JObject)jobj.DeepClone(); 
@@ -1206,7 +1203,7 @@ namespace ConsummerScreenPageBot
             try
             {
             
-                
+                // Gửi link tới queue screen link để job chụp ảnh từ link click xử lý
                 var targetQueue = RabbitQueueScreenLink; // Queue name này dùng để nhận dữ liệu từ link click banner
                 
                 if (string.IsNullOrWhiteSpace(linkClick))
