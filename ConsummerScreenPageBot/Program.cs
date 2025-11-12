@@ -1,4 +1,4 @@
-﻿// Create By: cuonglv
+﻿// Create By: cuonglv 2 2
 // git add .
 // git commit -m "update code mới"
 // git push origin main
@@ -248,7 +248,15 @@ namespace ConsummerScreenPageBot
                                     var jobj = JObject.Parse(message);
 
                                     // Link web can chup: screen_banner: chụp banner , link_click_banner: chụp trang đích sau khi click banner
-                                    siteUrl = task_bot == "screen_banner" ? jobj["link_web"]?.ToString() : jobj["link_click_banner"].ToString();
+                                    // Fix null pointer if property does not exist 277
+                                    if (task_bot == "screen_banner")
+                                    {
+                                        siteUrl = jobj["link_web"] != null ? jobj["link_web"].ToObject<string>() : "";
+                                    }
+                                    else
+                                    {
+                                        siteUrl = jobj["link_click_banner"] != null ? jobj["link_click_banner"].ToObject<string>() : "";
+                                    }
 
                                     // So luong segment chia trang de gui cho GEMINI phan tich hinh anh
                                     segment_page = jobj["slice"] != null ? jobj["slice"].ToObject<int>() : 5;
