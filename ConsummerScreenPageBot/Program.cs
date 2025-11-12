@@ -2,6 +2,11 @@
 // git add .
 // git commit -m "update code mới"
 // git push origin main
+
+// keo de code
+// git fetch --all
+//git reset --hard origin/main
+
 using Newtonsoft.Json.Linq;
 using OpenQA.Selenium.Chrome;
 using OpenQA.Selenium;
@@ -43,7 +48,7 @@ namespace ConsummerScreenPageBot
         public static string is_headless = ConfigurationManager.AppSettings["is_headless"] ?? "0";
         public static string websites_config = ConfigurationManager.AppSettings["Websites"] ?? "";
         public static string analyze_publish_raw = ConfigurationManager.AppSettings["AnalyzePublishRaw"] ?? "0";
-
+         public static string task_bot = ConfigurationManager.AppSettings["task"] ?? "";
         // Publisher for analyze queue
         private static readonly object analyzePubLock = new object();
         private static IConnection? analyzeConnection;
@@ -972,10 +977,10 @@ namespace ConsummerScreenPageBot
         {
             try
             {
-                // Kiểm tra nếu RabbitQueueScreenLink chứa "NO_RUN" thì bỏ qua hàm này
-                if (!string.IsNullOrWhiteSpace(RabbitQueueScreenLink) && RabbitQueueScreenLink.Contains("NO_RUN", StringComparison.OrdinalIgnoreCase))
+                // Kiểm tra nếu nhiem vu cua Bot la chup page theo link  thì bỏ qua hàm này
+                if (task_bot == "screen_link_page")
                 {
-                    Console.WriteLine("[AdLink] RabbitQueueScreenLink có chứa 'NO_RUN', bỏ qua ProcessIframesAndPushToQueue.");
+                    Console.WriteLine("[AdLink] RabbitQueueScreenLink có chứa 'screen_link_page', bỏ qua ProcessIframesAndPushToQueue.");
                     return;
                 }
                 Console.WriteLine($"[AdLink] Bắt đầu thu thập links từ HTML source cho host={hostLabel}");
