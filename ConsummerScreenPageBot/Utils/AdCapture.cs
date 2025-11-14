@@ -291,6 +291,122 @@ namespace ConsummerScreenPageBot
             if (string.IsNullOrWhiteSpace(value)) value = "element";
             return value.Length > 60 ? value.Substring(0, 60) : value;
         }
+
+        /// <summary>
+        /// Chụp full page screenshot và convert sang base64
+        /// </summary>
+        public static string[] CaptureSegmentScreenshots(IWebDriver driver, int segmentCount = 3, long jpegQuality = 80)
+        {
+            var base64Segments = new List<string>();
+            try
+            {
+                Console.WriteLine("[AdLink] Bắt đầu chụp screenshot dạng segment...");
+                
+                var js = (IJavaScriptExecutor)driver;
+                int pageWidth = 1920;
+                int totalHeight = 3000;
+                
+                try
+                {
+                    pageWidth = Convert.ToInt32(js.ExecuteScript("return Math.max(document.documentElement.scrollWidth, document.body.scrollWidth, window.innerWidth || 0);"));
+                    totalHeight = Convert.ToInt32(js.ExecuteScript("return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight, window.innerHeight || 0);"));
+                }
+                catch { }
+                
+                if (totalHeight <= 0) totalHeight = 3000;
+                totalHeight = Math.Min(totalHeight, 30000);
+                segmentCount = Math.Max(1, segmentCount);
+                
+                byte[] fullShotBytes = Array.Empty<byte>();
+                var chrome = driver as ChromeDriver;
+                bool fullOk = false;
+                
+                if (chrome != null)
+                {
+                    var metrics = new Dictionary<string, object>
+                    {
+                        { "mobile", false },
+                        { "width", Math.Max(1, pageWidth) },
+                        { "height", Math.Max(1, totalHeight) },
+                        { "deviceScaleFactor", 1 },
+                        { "scale", 1 }
+                    };
+                    try { chrome.ExecuteCdpCommand("Emulation.setDeviceMetricsOverride", metrics); } catch { }
+                    try { chrome.ExecuteCdpCommand("Page.enable", new Dictionary<string, object>()); } catch { }
+                    
+                    try
+                    {
+                        var args = new Dictionary<string, object>
+                        {
+                            { "format", "jpeg" },
+                            { "quality", 90 },
+                            { "captureBeyondViewport", true }
+                        };
+                        var result = chrome.ExecuteCdpCommand("Page.captureScreenshot", args) as IDictionary<string, object>;
+                        if (result != null && result.TryGetValue("data", out var dataObj) && dataObj is string base64)
+                        {
+                            fullShotBytes = Convert.FromBase64String(base64);
+                            fullOk = fullShotBytes != null && fullShotBytes.Length > 0;
+                        }
+                    }
+                    catch { fullOk = false; }
+                    
+                    if (!fullOk)
+                    {
+                        try
+                        {
+                            var shot = ((ITakesScreenshot)driver).GetScreenshot();
+                            fullShotBytes = shot.AsByteArray;
+                            fullOk = fullShotBytes != null && fullShotBytes.Length > 0;
+                        }
+                        catch { fullOk = false; }
+                    }
+                    
+                    try { chrome.ExecuteCdpCommand("Emulation.clearDeviceMetricsOverride", new Dictionary<string, object>()); } catch { }
+                }
+                else
+                {
+                    try
+                    {
+                        var shot = ((ITakesScreenshot)driver).GetScreenshot();
+                        fullShotBytes = shot.AsByteArray;
+                        fullOk = fullShotBytes != null && fullShotBytes.Length > 0;
+                    }
+                    catch { fullOk = false; }
+                }
+                
+                if (!fullOk || fullShotBytes == null || fullShotBytes.Length == 0)
+                {
+                    Console.WriteLine("[AdLink] Không thể chụp screenshot full page");
+                    return base64Segments.ToArray();
+                }
+                
+                using var ms = new MemoryStream(fullShotBytes);
+                using var fullImg = Image.Load<Rgba32>(ms);
+                
+                int sliceHeight = (int)Math.Ceiling(fullImg.Height / (double)segmentCount);
+                
+                for (int i = 0; i < segmentCount; i++)
+                {
+                    int y = i * sliceHeight;
+                    int currentHeight = Math.Min(sliceHeight, Math.Max(1, fullImg.Height - y));
+                    if (currentHeight <= 0) break;
+                    
+                    using var seg = fullImg.Clone(ctx => ctx.Crop(new Rectangle(0, y, fullImg.Width, currentHeight)));
+                    using var segMs = new MemoryStream();
+                    seg.Save(segMs, new JpegEncoder { Quality = (int)Math.Clamp(jpegQuality, 1, 100) });
+                    base64Segments.Add(Convert.ToBase64String(segMs.ToArray()));
+                }
+                
+                Console.WriteLine($"[AdLink] Đã chụp {base64Segments.Count} segment.");
+                return base64Segments.ToArray();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AdLink] Lỗi khi chụp segment screenshot: {ex.Message}");
+                return base64Segments.ToArray();
+            }
+        }
     }
 }
 
