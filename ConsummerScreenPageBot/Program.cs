@@ -3,6 +3,10 @@
 // git commit -m "update code mới"
 // git push origin main
 
+// git add ConsummerScreenPageBot/Program.cs
+// git commit -m "Update Program.cs"
+// git push origin main
+
 // keo de code
 // git fetch --all
 //git reset --hard origin/main
@@ -10,10 +14,12 @@
 using Newtonsoft.Json.Linq;
 using OpenQA.Selenium.Chrome;
 using OpenQA.Selenium;
+using OpenQA.Selenium.Interactions;
 using OpenQA.Selenium.Support.UI;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using System.Configuration;
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Win32;
@@ -991,206 +997,693 @@ namespace ConsummerScreenPageBot
                     Console.WriteLine("[AdLink] RabbitQueueScreenLink có chứa 'screen_link_page', bỏ qua ProcessIframesAndPushToQueue.");
                     return;
                 }
-                Console.WriteLine($"[AdLink] Bắt đầu thu thập links từ HTML source cho host={hostLabel}");
                 
-                // Lấy HTML source từ driver
-                var htmlSource = driver.PageSource;
-                Console.WriteLine($"[AdLink] Debug - HTML source length: {htmlSource?.Length ?? 0} characters");
+                Console.WriteLine($"[AdLink] Bắt đầu xử lý iframe và element quảng cáo cho host={hostLabel}");
                 
-                if (string.IsNullOrWhiteSpace(htmlSource))
+                // Lưu window handle gốc
+                string originalWindowHandle = driver.CurrentWindowHandle;
+                string originalUrl = driver.Url;
+                
+                // Lấy domain chính của trang hiện tại để loại bỏ link cùng domain
+                // Ví dụ: tuoitre.vn -> lấy "tuoitre", vnexpress.net -> lấy "vnexpress"
+                string currentDomainKey = string.Empty;
+                try
                 {
-                    Console.WriteLine($"[AdLink] HTML source rỗng, không thể parse links");
+                    var uri = new Uri(originalUrl);
+                    string host = uri.Host.ToLowerInvariant();
+                    // Loại bỏ www. nếu có
+                    if (host.StartsWith("www."))
+                    {
+                        host = host.Substring(4);
+                    }
+                    // Lấy phần domain chính (trước dấu chấm đầu tiên)
+                    int firstDotIndex = host.IndexOf('.');
+                    if (firstDotIndex > 0)
+                    {
+                        currentDomainKey = host.Substring(0, firstDotIndex);
+                    }
+                    else
+                    {
+                        currentDomainKey = host;
+                    }
+                    Console.WriteLine($"[AdLink] Domain key hiện tại: {currentDomainKey} (từ {host}), sẽ loại bỏ các link chứa domain này");
+                }
+                catch
+                {
+                    Console.WriteLine($"[AdLink] Không thể lấy domain từ URL: {originalUrl}");
+                }
+                
+                // Hàm helper để kiểm tra link có chứa domain key hiện tại không
+                bool IsExternalLink(string link)
+                {
+                    if (string.IsNullOrWhiteSpace(link) || string.IsNullOrWhiteSpace(currentDomainKey))
+                        return true; // Nếu không có domain key để so sánh, cho phép tất cả
+                    
+                    string linkLower = link.ToLowerInvariant();
+                    // Nếu IndexOf = -1 nghĩa là không chứa domain key, đây là link external
+                    return linkLower.IndexOf(currentDomainKey, StringComparison.OrdinalIgnoreCase) == -1;
+                }
+                
+                // Thu thập tất cả banner element có thể click được (tránh stale element)
+                var bannerElements = new List<IWebElement>();
+                try
+                {
+                    // 1. Tìm iframe banner
+                    var iframes = driver.FindElements(By.TagName("iframe"));
+                    Console.WriteLine($"[AdLink] Tìm thấy {iframes.Count} iframe(s) trên trang");
+                    foreach (var iframe in iframes)
+                    {
+                        try
+                        {
+                            // Kiểm tra kích thước và vị trí của iframe (chỉ lấy iframe có kích thước hợp lý)
+                            var js = (IJavaScriptExecutor)driver;
+                            var isVisible = (bool)js.ExecuteScript(@"
+                                var rect = arguments[0].getBoundingClientRect();
+                                return rect.width >= 120 && rect.height >= 30 && 
+                                       rect.top >= 0 && rect.left >= 0 &&
+                                       window.getComputedStyle(arguments[0]).display !== 'none';
+                            ", iframe);
+                            
+                            if (isVisible)
+                            {
+                                bannerElements.Add(iframe);
+                            }
+                        }
+                        catch { }
+                    }
+                    
+                    // 2. Tìm element banner từ selector quảng cáo
+                    var adSelectors = GetCommonAdSelectors();
+                    Console.WriteLine($"[AdLink] Bắt đầu tìm element quảng cáo với {adSelectors.Length} selector(s)");
+                    
+                    foreach (var selector in adSelectors)
+                    {
+                        try
+                        {
+                            var adElements = driver.FindElements(By.CssSelector(selector));
+                            Console.WriteLine($"[AdLink] Selector '{selector}': tìm thấy {adElements.Count} element(s)");
+                            
+                            foreach (var element in adElements)
+                            {
+                                try
+                                {
+                                    // Kiểm tra element có thể click được và có kích thước hợp lý
+                                    var js = (IJavaScriptExecutor)driver;
+                                    var isClickable = (bool)js.ExecuteScript(@"
+                                        var el = arguments[0];
+                                        var rect = el.getBoundingClientRect();
+                                        if (rect.width < 120 || rect.height < 30) return false;
+                                        if (rect.top < 0 || rect.left < 0) return false;
+                                        var style = window.getComputedStyle(el);
+                                        if (style.display === 'none' || style.visibility === 'hidden') return false;
+                                        return true;
+                                    ", element);
+                                    
+                                    if (isClickable)
+                                    {
+                                        bannerElements.Add(element);
+                                    }
+                                }
+                                catch { }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[AdLink] Lỗi khi xử lý selector '{selector}': {ex.Message}");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[AdLink] Lỗi khi thu thập banner element: {ex.Message}");
                     return;
                 }
                 
-                // Parse links từ HTML bằng C#
-                var allLinks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                
-                // 1. Tìm tất cả href trong <a> tags với target="_blank"
-                var hrefPattern = @"<a(?=[^>]*\btarget\s*=\s*[""']?_blank[""']?)[^>]+href\s*=\s*[""']([^""']+)[""'][^>]*>";
-                var hrefMatches = Regex.Matches(htmlSource, hrefPattern, RegexOptions.IgnoreCase);
-                Console.WriteLine($"[AdLink] Debug - Tìm thấy {hrefMatches.Count} <a href target=\"_blank\"> tags");
-                foreach (Match match in hrefMatches)
+                if (bannerElements.Count == 0)
                 {
-                    if (match.Groups.Count > 1)
-                    {
-                        var href = match.Groups[1].Value.Trim();
-                        if (IsValidHttpLink(href))
-                        {
-                            allLinks.Add(NormalizeUrl(href));
-                        }
-                    }
+                    Console.WriteLine($"[AdLink] Không tìm thấy banner nào, kết thúc xử lý");
+                    return;
                 }
                 
-                // 2. Tìm tất cả src trong <iframe> và <frame> tags
-                var iframePattern = @"<(?:iframe|frame)[^>]+src\s*=\s*[""']([^""']+)[""'][^>]*>";
-                var iframeMatches = Regex.Matches(htmlSource, iframePattern, RegexOptions.IgnoreCase);
-                Console.WriteLine($"[AdLink] Debug - Tìm thấy {iframeMatches.Count} <iframe/frame src> tags");
-                foreach (Match match in iframeMatches)
-                {
-                    if (match.Groups.Count > 1)
-                    {
-                        var src = match.Groups[1].Value.Trim();
-                        if (IsValidHttpLink(src))
-                        {
-                            allLinks.Add(NormalizeUrl(src));
-                        }
-                    }
-                }
-                
-                // 3. Tìm data-href và data-url
-                var dataHrefPattern = @"data-href\s*=\s*[""']([^""']+)[""']";
-                var dataHrefMatches = Regex.Matches(htmlSource, dataHrefPattern, RegexOptions.IgnoreCase);
-                Console.WriteLine($"[AdLink] Debug - Tìm thấy {dataHrefMatches.Count} data-href attributes");
-                foreach (Match match in dataHrefMatches)
-                {
-                    if (match.Groups.Count > 1)
-                    {
-                        var href = match.Groups[1].Value.Trim();
-                        if (IsValidHttpLink(href))
-                        {
-                            allLinks.Add(NormalizeUrl(href));
-                        }
-                    }
-                }
-                
-                var dataUrlPattern = @"data-url\s*=\s*[""']([^""']+)[""']";
-                var dataUrlMatches = Regex.Matches(htmlSource, dataUrlPattern, RegexOptions.IgnoreCase);
-                Console.WriteLine($"[AdLink] Debug - Tìm thấy {dataUrlMatches.Count} data-url attributes");
-                foreach (Match match in dataUrlMatches)
-                {
-                    if (match.Groups.Count > 1)
-                    {
-                        var url = match.Groups[1].Value.Trim();
-                        if (IsValidHttpLink(url))
-                        {
-                            allLinks.Add(NormalizeUrl(url));
-                        }
-                    }
-                }
-                
-                // 4. Tìm URLs trong onclick handlers
-                var onclickPattern = @"onclick\s*=\s*[""']([^""']+)[""']";
-                var onclickMatches = Regex.Matches(htmlSource, onclickPattern, RegexOptions.IgnoreCase);
-                Console.WriteLine($"[AdLink] Debug - Tìm thấy {onclickMatches.Count} onclick handlers");
-                foreach (Match match in onclickMatches)
-                {
-                    if (match.Groups.Count > 1)
-                    {
-                        var onclickContent = match.Groups[1].Value;
-                        // Tìm URLs trong onclick content
-                        var urlInOnclick = Regex.Matches(onclickContent, @"https?://[^\s'""\)]+", RegexOptions.IgnoreCase);
-                        foreach (Match urlMatch in urlInOnclick)
-                        {
-                            var url = urlMatch.Value.Trim();
-                            if (IsValidHttpLink(url))
-                            {
-                                allLinks.Add(NormalizeUrl(url));
-                            }
-                        }
-                    }
-                }
-                
-                Console.WriteLine($"[AdLink] Tổng cộng thu thập được {allLinks.Count} link(s) HTTP/HTTPS hợp lệ");
-                
-                // Phân loại link quảng cáo bằng C#
-                var adDomains = new[]
-                {
-                    "doubleclick.net", "googlesyndication.com", "adservice.google.com",
-                    "adclick.g.doubleclick.net", "googleadservices.com",
-                    "adsystem.amazon.com", "amazon-adsystem.com",
-                    "ads.yahoo.com", "taboola.com", "outbrain.com", "adnxs.com",
-                    "criteo.com", "adsrvr.org", "advertising.com", "adtech.com",
-                    "adform.net", "rubiconproject.com", "openx.net", "adsafeprotected.com",
-                };
-                
-                string currentDomain = string.Empty;
-                try { currentDomain = new Uri(driver.Url).Host; } catch { currentDomain = hostLabel ?? string.Empty; }
-                string CleanHost(string h) => string.IsNullOrWhiteSpace(h) ? string.Empty : h.Replace("www.", string.Empty, StringComparison.OrdinalIgnoreCase);
-                currentDomain = CleanHost(currentDomain);
-                
-                int ClassifyScore(string href)
-                {
-                    int score = 0;
-                    try
-                    {
-                        var uri = new Uri(href);
-                        var host = CleanHost(uri.Host).ToLowerInvariant();
-                        // Ad domain exact/subdomain
-                        foreach (var ad in adDomains)
-                        {
-                            if (host == ad || host.EndsWith("." + ad, StringComparison.OrdinalIgnoreCase))
-                            {
-                                score += 5; break;
-                            }
-                        }
-                        // URL patterns
-                        var urlLower = href.ToLowerInvariant();
-                        if (urlLower.Contains("adclick") || urlLower.Contains("utm_source=ad") ||
-                            urlLower.Contains("utm_medium=ad") || urlLower.Contains("click?") ||
-                            urlLower.Contains("impression") || urlLower.Contains("gclid") ||
-                            urlLower.Contains("fbclid") || urlLower.Contains("ref=ad") ||
-                            urlLower.Contains("promo") || urlLower.Contains("sponsor"))
-                        {
-                            score += 3;
-                        }
-                        // Path hints
-                        if (uri.AbsolutePath.Contains("banner", StringComparison.OrdinalIgnoreCase) ||
-                            uri.AbsolutePath.Contains("ad", StringComparison.OrdinalIgnoreCase))
-                        {
-                            score += 1;
-                        }
-                        // External domain
-                        var linkDomain = host;
-                        if (!string.IsNullOrEmpty(currentDomain) &&
-                            !linkDomain.Equals(currentDomain, StringComparison.OrdinalIgnoreCase) &&
-                            !linkDomain.Contains(currentDomain, StringComparison.OrdinalIgnoreCase) &&
-                            !currentDomain.Contains(linkDomain, StringComparison.OrdinalIgnoreCase))
-                        {
-                            score += 1;
-                        }
-                    }
-                    catch { }
-                    return score;
-                }
-                
-                var adOnly = new List<(string href,int score)>();
-                foreach (var href in allLinks)
-                {
-                    int s = ClassifyScore(href);
-                    if (s >= 2) adOnly.Add((href,s));
-                }
-                
-                Console.WriteLine($"[AdLink] Sau phân loại: {adOnly.Count} / {allLinks.Count} link có khả năng quảng cáo (>=2 điểm)");
+                Console.WriteLine($"[AdLink] Đã tìm thấy {bannerElements.Count} banner element(s), bắt đầu click và thu thập link");
                 
                 // Lấy job params từ RabbitQueue gốc để merge vào payload
                 var jobParamsSnapshot = lastJobParams; // tránh race condition
                 
-                // Push chỉ link quảng cáo
                 int processedCount = 0;
-                foreach (var item in adOnly)
+                int bannerIndex = 0;
+                
+                // Click vào từng banner và thu thập link
+                foreach (var bannerElement in bannerElements)
                 {
-                    var href = item.href;
+                    bannerIndex++;
                     try
                     {
-                        PushIframeToQueue(href, "", jobParamsSnapshot);
+                        Console.WriteLine($"[AdLink] Đang xử lý banner {bannerIndex}/{bannerElements.Count}");
+                        
+                        // Đảm bảo đang ở tab gốc
+                        try
+                        {
+                            driver.SwitchTo().Window(originalWindowHandle);
+                        }
+                        catch
+                        {
+                            if (driver.WindowHandles.Contains(originalWindowHandle))
+                            {
+                                driver.SwitchTo().Window(originalWindowHandle);
+                            }
+                            else
+                            {
+                                Console.WriteLine($"[AdLink] Tab gốc không còn tồn tại, bỏ qua banner {bannerIndex}");
+                                continue;
+                            }
+                        }
+                        
+                        // Lưu số lượng window hiện tại
+                        var windowsBefore = driver.WindowHandles.Count;
+                        string? targetUrl = null;
+                        bool shouldOpenUrl = false;
+                        
+                        try
+                        {
+                            // Scroll đến element để đảm bảo nó visible
+                            ((IJavaScriptExecutor)driver).ExecuteScript("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", bannerElement);
+                            System.Threading.Thread.Sleep(500);
+                            
+                            // Lấy tọa độ của element (center point) bằng JavaScript
+                            // Điều này hoạt động tốt với banner được render từ vector/iframe
+                            var js = (IJavaScriptExecutor)driver;
+                            var rect = js.ExecuteScript(@"
+                                var el = arguments[0];
+                                var rect = el.getBoundingClientRect();
+                                // Tọa độ viewport (clientX/clientY) - dùng cho elementFromPoint và MouseEvent
+                                var centerX = Math.round(rect.left + rect.width / 2);
+                                var centerY = Math.round(rect.top + rect.height / 2);
+                                return {
+                                    clientX: centerX,
+                                    clientY: centerY,
+                                    width: Math.round(rect.width),
+                                    height: Math.round(rect.height)
+                                };
+                            ", bannerElement) as System.Collections.Generic.Dictionary<string, object>;
+                            
+                            if (rect != null && rect.ContainsKey("clientX") && rect.ContainsKey("clientY"))
+                            {
+                                int centerX = Convert.ToInt32(rect["clientX"]);
+                                int centerY = Convert.ToInt32(rect["clientY"]);
+                                int width = Convert.ToInt32(rect["width"]);
+                                int height = Convert.ToInt32(rect["height"]);
+                                
+                                Console.WriteLine($"[AdLink] Banner {bannerIndex} -> Tọa độ center (viewport): ({centerX}, {centerY}), kích thước: {width}x{height}");
+                                
+                                // Kiểm tra xem element có phải iframe không
+                                bool isIframe = bannerElement.TagName.ToLower() == "iframe";
+                                
+                                if (isIframe)
+                                {
+                                    // Với iframe: click trực tiếp vào tọa độ của iframe trên trang chính
+                                    // Không lấy src vì có thể là container.html trống
+                                    Console.WriteLine($"[AdLink] Banner {bannerIndex} (iframe) -> Click vào tọa độ iframe ({centerX}, {centerY})");
+                                    // Không set targetUrl, sẽ click vào tọa độ sau
+                                }
+                                else
+                                {
+                                    // Xử lý element thường: tìm link bên trong
+                                    try
+                                    {
+                                        // Tìm link <a> bên trong element
+                                        var links = bannerElement.FindElements(By.TagName("a"));
+                                        foreach (var link in links)
+                                        {
+                                            try
+                                            {
+                                                string? href = link.GetAttribute("href");
+                                                if (!string.IsNullOrWhiteSpace(href) && IsValidHttpLink(href) && IsExternalLink(href))
+                                                {
+                                                    targetUrl = href;
+                                                    shouldOpenUrl = true;
+                                                    Console.WriteLine($"[AdLink] Banner {bannerIndex} -> Tìm thấy link: {href.Substring(0, Math.Min(80, href.Length))}...");
+                                                    break;
+                                                }
+                                            }
+                                            catch { }
+                                        }
+                                        
+                                        // Nếu không tìm thấy link, thử lấy data-href, data-url
+                                        if (string.IsNullOrWhiteSpace(targetUrl))
+                                        {
+                                            string? dataHref = bannerElement.GetAttribute("data-href");
+                                            if (!string.IsNullOrWhiteSpace(dataHref) && IsValidHttpLink(dataHref) && IsExternalLink(dataHref))
+                                            {
+                                                targetUrl = dataHref;
+                                                shouldOpenUrl = true;
+                                            }
+                                            else
+                                            {
+                                                string? dataUrl = bannerElement.GetAttribute("data-url");
+                                                if (!string.IsNullOrWhiteSpace(dataUrl) && IsValidHttpLink(dataUrl) && IsExternalLink(dataUrl))
+                                                {
+                                                    targetUrl = dataUrl;
+                                                    shouldOpenUrl = true;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Console.WriteLine($"[AdLink] Lỗi khi tìm link trong banner {bannerIndex}: {ex.Message}");
+                                    }
+                                }
+                                
+                                // Nếu không tìm thấy URL, click vào tọa độ center của banner
+                                if (string.IsNullOrWhiteSpace(targetUrl))
+                                {
+                                    try
+                                    {
+                                        if (isIframe)
+                                        {
+                                            // Với iframe: switch vào iframe và click bên trong
+                                            // Cách này đảm bảo click được vào content bên trong iframe
+                                            try
+                                            {
+                                                driver.SwitchTo().Frame(bannerElement);
+                                                Console.WriteLine($"[AdLink] Banner {bannerIndex} (iframe) -> Đã switch vào iframe");
+                                                
+                                                // Đợi một chút để iframe content load
+                                                System.Threading.Thread.Sleep(1000);
+                                                
+                                                // Tìm link bên trong iframe trước
+                                                var linksInFrame = driver.FindElements(By.TagName("a"));
+                                                bool foundLink = false;
+                                                
+                                                foreach (var link in linksInFrame)
+                                                {
+                                                    try
+                                                    {
+                                                        string? href = link.GetAttribute("href");
+                                                        if (!string.IsNullOrWhiteSpace(href) && IsValidHttpLink(href) && IsExternalLink(href))
+                                                        {
+                                                            targetUrl = href;
+                                                            shouldOpenUrl = true;
+                                                            foundLink = true;
+                                                            Console.WriteLine($"[AdLink] Banner {bannerIndex} (iframe) -> Tìm thấy link: {href.Substring(0, Math.Min(80, href.Length))}...");
+                                                            break;
+                                                        }
+                                                    }
+                                                    catch { }
+                                                }
+                                                
+                                                // Nếu không tìm thấy link, thử click vào center của iframe content
+                                                if (!foundLink)
+                                                {
+                                                    try
+                                                    {
+                                                        // Lấy kích thước của iframe content
+                                                        var frameSize = js.ExecuteScript(@"
+                                                            return {
+                                                                width: document.body.scrollWidth || document.documentElement.clientWidth,
+                                                                height: document.body.scrollHeight || document.documentElement.clientHeight
+                                                            };
+                                                        ") as System.Collections.Generic.Dictionary<string, object>;
+                                                        
+                                                        if (frameSize != null)
+                                                        {
+                                                            int frameWidth = Convert.ToInt32(frameSize["width"]);
+                                                            int frameHeight = Convert.ToInt32(frameSize["height"]);
+                                                            int frameCenterX = frameWidth / 2;
+                                                            int frameCenterY = frameHeight / 2;
+                                                            
+                                                            Console.WriteLine($"[AdLink] Banner {bannerIndex} (iframe) -> Click vào center của iframe content ({frameCenterX}, {frameCenterY})");
+                                                            
+                                                            // Tìm element tại tọa độ và click
+                                                            var clickResult = js.ExecuteScript(@"
+                                                                var x = arguments[0];
+                                                                var y = arguments[1];
+                                                                var element = document.elementFromPoint(x, y);
+                                                                if (!element) return {clicked: false};
+                                                                
+                                                                // Tìm element clickable
+                                                                var clickable = element;
+                                                                while (clickable && clickable !== document.body) {
+                                                                    var tag = clickable.tagName.toLowerCase();
+                                                                    var hasHref = clickable.href || clickable.getAttribute('href');
+                                                                    
+                                                                    if (tag === 'a' || hasHref) {
+                                                                        var href = clickable.href || clickable.getAttribute('href') || '';
+                                                                        if (href) {
+                                                                            window.open(href, '_blank');
+                                                                            return {clicked: true, href: href};
+                                                                        }
+                                                                    }
+                                                                    clickable = clickable.parentElement;
+                                                                }
+                                                                
+                                                                // Nếu không tìm thấy link, thử click event
+                                                                var event = new MouseEvent('click', {
+                                                                    view: window,
+                                                                    bubbles: true,
+                                                                    cancelable: true,
+                                                                    clientX: x,
+                                                                    clientY: y,
+                                                                    button: 0
+                                                                });
+                                                                element.dispatchEvent(event);
+                                                                return {clicked: true, href: ''};
+                                                            ", frameCenterX, frameCenterY) as System.Collections.Generic.Dictionary<string, object>;
+                                                            
+                                                            if (clickResult != null && clickResult.ContainsKey("clicked"))
+                                                            {
+                                                                bool clicked = Convert.ToBoolean(clickResult["clicked"]);
+                                                                string href = clickResult.ContainsKey("href") ? clickResult["href"].ToString() ?? "" : "";
+                                                                
+                                                                if (clicked && !string.IsNullOrWhiteSpace(href) && IsValidHttpLink(href) && IsExternalLink(href))
+                                                                {
+                                                                    targetUrl = href;
+                                                                    shouldOpenUrl = true;
+                                                                    Console.WriteLine($"[AdLink] Banner {bannerIndex} (iframe) -> Tìm thấy href từ click: {href.Substring(0, Math.Min(80, href.Length))}...");
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    catch (Exception ex2)
+                                                    {
+                                                        Console.WriteLine($"[AdLink] Banner {bannerIndex} (iframe) -> Lỗi khi click trong iframe: {ex2.Message}");
+                                                    }
+                                                }
+                                                
+                                                // Quay lại main content
+                                                driver.SwitchTo().DefaultContent();
+                                            }
+                                            catch (Exception exActions)
+                                            {
+                                                Console.WriteLine($"[AdLink] Banner {bannerIndex} (iframe) -> Lỗi khi xử lý iframe: {exActions.Message}");
+                                                try { driver.SwitchTo().DefaultContent(); } catch { }
+                                            }
+                                        }
+                                        else
+                                        {
+                                            // Với element thường: Click trực tiếp bằng nhiều cách
+                                            Console.WriteLine($"[AdLink] Banner {bannerIndex} -> Thử click trực tiếp vào banner");
+                                            
+                                            bool clicked = false;
+                                            
+                                            // Cách 1: Click bằng Actions
+                                            try
+                                            {
+                                                var actions = new Actions(driver);
+                                                actions.MoveToElement(bannerElement).Click().Perform();
+                                                clicked = true;
+                                                Console.WriteLine($"[AdLink] Banner {bannerIndex} -> Click thành công bằng Actions");
+                                            }
+                                            catch (Exception ex1)
+                                            {
+                                                // Cách 2: Click bằng JavaScript
+                                                try
+                                                {
+                                                    js.ExecuteScript("arguments[0].click();", bannerElement);
+                                                    clicked = true;
+                                                    Console.WriteLine($"[AdLink] Banner {bannerIndex} -> Click thành công bằng JavaScript");
+                                                }
+                                                catch (Exception ex2)
+                                                {
+                                                    // Cách 3: Click trực tiếp
+                                                    try
+                                                    {
+                                                        bannerElement.Click();
+                                                        clicked = true;
+                                                        Console.WriteLine($"[AdLink] Banner {bannerIndex} -> Click thành công trực tiếp");
+                                                    }
+                                                    catch (Exception ex3)
+                                                    {
+                                                        Console.WriteLine($"[AdLink] Banner {bannerIndex} -> Tất cả cách click đều fail");
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Console.WriteLine($"[AdLink] Lỗi khi click vào tọa độ banner {bannerIndex}: {ex.Message}");
+                                        // Fallback: thử click bằng Actions
+                                        try
+                                        {
+                                            var actions = new Actions(driver);
+                                            actions.MoveToElement(bannerElement).Click().Perform();
+                                            Console.WriteLine($"[AdLink] Banner {bannerIndex} -> Fallback: Click bằng Actions");
+                                        }
+                                        catch (Exception ex2)
+                                        {
+                                            Console.WriteLine($"[AdLink] Banner {bannerIndex} -> Fallback Actions cũng fail: {ex2.Message}");
+                                        }
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                Console.WriteLine($"[AdLink] Banner {bannerIndex} -> Không thể lấy tọa độ, thử click trực tiếp");
+                                // Fallback: thử click trực tiếp
+                                try
+                                {
+                                    ((IJavaScriptExecutor)driver).ExecuteScript("arguments[0].click();", bannerElement);
+                    }
+                    catch { }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[AdLink] Lỗi khi xử lý banner {bannerIndex}: {ex.Message}");
+                            continue;
+                        }
+                        
+                        // Nếu có URL, mở bằng window.open
+                        if (shouldOpenUrl && !string.IsNullOrWhiteSpace(targetUrl))
+                        {
+                            try
+                            {
+                                ((IJavaScriptExecutor)driver).ExecuteScript("window.open(arguments[0], '_blank');", targetUrl);
+                                System.Threading.Thread.Sleep(1500);
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[AdLink] Lỗi khi mở URL cho banner {bannerIndex}: {ex.Message}");
+                                continue;
+                            }
+                        }
+                        else
+                        {
+                            // Đợi tab mới mở hoặc trang navigate sau khi click
+                            // Đợi lâu hơn để đảm bảo click được xử lý
+                            System.Threading.Thread.Sleep(3000);
+                        }
+                        
+                        // Kiểm tra xem có tab mới không (kiểm tra nhiều lần với delay)
+                        var windowsAfter = driver.WindowHandles.Count;
+                        bool hasNewTab = false;
+                        
+                        // Kiểm tra lại sau 1 giây nữa (một số trang load chậm)
+                        if (windowsAfter <= windowsBefore)
+                        {
+                            System.Threading.Thread.Sleep(1000);
+                            windowsAfter = driver.WindowHandles.Count;
+                            hasNewTab = windowsAfter > windowsBefore;
+                        }
+                        else
+                        {
+                            hasNewTab = true;
+                        }
+                        
+                        if (hasNewTab)
+                        {
+                            // Chuyển sang tab mới
+                            var newWindowHandles = driver.WindowHandles.Where(h => !h.Equals(originalWindowHandle)).ToList();
+                            if (newWindowHandles.Count > 0)
+                            {
+                                string newWindowHandle = newWindowHandles[newWindowHandles.Count - 1];
+                                driver.SwitchTo().Window(newWindowHandle);
+                                
+                                // Đợi 3 giây để trang load
+                                System.Threading.Thread.Sleep(3000);
+                                
+                                // Lấy URL và kiểm tra
+                                string clickedUrl = driver.Url;
+                                
+                                // Kiểm tra xem link có external không và có ảnh không
+                                if (IsExternalLink(clickedUrl) && CheckPageHasImages(driver))
+                                {
+                                    Console.WriteLine($"[AdLink] Banner {bannerIndex} -> Trang có ảnh và external, lưu link: {clickedUrl}");
+                                    PushIframeToQueue(clickedUrl, "", jobParamsSnapshot);
                         processedCount++;
-                        Console.WriteLine($"[AdLink] Pushed {processedCount}/{adOnly.Count} - score={item.score} - {href.Substring(0, Math.Min(80, href.Length))}...");
+                                }
+                                else
+                                {
+                                    if (!IsExternalLink(clickedUrl))
+                                    {
+                                        Console.WriteLine($"[AdLink] Banner {bannerIndex} -> Link cùng domain, bỏ qua: {clickedUrl}");
+                                    }
+                                    else
+                                    {
+                                        Console.WriteLine($"[AdLink] Banner {bannerIndex} -> Trang không có ảnh, bỏ qua: {clickedUrl}");
+                                    }
+                                }
+                                
+                                // Đóng tab mới và quay về tab gốc
+                                driver.Close();
+                                driver.SwitchTo().Window(originalWindowHandle);
+                                System.Threading.Thread.Sleep(500);
+                            }
+                        }
+                        else
+                        {
+                            // Nếu không mở tab mới, có thể đã navigate trên tab hiện tại
+                            // Kiểm tra URL có thay đổi không
+                            string currentUrl = driver.Url;
+                            if (currentUrl != originalUrl)
+                            {
+                                // Đợi 3 giây để trang load
+                                System.Threading.Thread.Sleep(3000);
+                                
+                                // Kiểm tra xem link có external không và có ảnh không
+                                if (IsExternalLink(currentUrl) && CheckPageHasImages(driver))
+                                {
+                                    Console.WriteLine($"[AdLink] Banner {bannerIndex} -> Trang có ảnh và external, lưu link: {currentUrl}");
+                                    PushIframeToQueue(currentUrl, "", jobParamsSnapshot);
+                        processedCount++;
+                                }
+                                
+                                // Quay lại trang gốc
+                                driver.Navigate().GoToUrl(originalUrl);
+                                System.Threading.Thread.Sleep(1000);
+                            }
+                            else
+                            {
+                                Console.WriteLine($"[AdLink] Banner {bannerIndex} -> Click không mở tab mới hoặc navigate, bỏ qua");
+                            }
+                        }
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[AdLink] Lỗi khi push link: {ex.Message}");
-                        ErrorWriter.WriteLog(LogPath, "ProcessAdLink", $"{hostLabel} => {href} => {ex}");
+                        Console.WriteLine($"[AdLink] Lỗi khi xử lý banner {bannerIndex}: {ex.Message}");
+                        ErrorWriter.WriteLog(LogPath, "ProcessIframesAndPushToQueue", $"{hostLabel} => Banner {bannerIndex} => {ex}");
+                        
+                        // Đảm bảo quay về tab gốc nếu có lỗi
+                        try
+                        {
+                            driver.SwitchTo().Window(originalWindowHandle);
+                        }
+                        catch
+                        {
+                            if (driver.WindowHandles.Count > 0)
+                            {
+                                driver.SwitchTo().Window(driver.WindowHandles[0]);
+                                originalWindowHandle = driver.CurrentWindowHandle;
+                            }
+                        }
                     }
                 }
                 
-                Console.WriteLine($"[AdLink] Hoàn thành xử lý {processedCount} link(s) quảng cáo cho host={hostLabel}");
+                // Đảm bảo đang ở tab gốc và trang gốc không bị thay đổi
+                try
+                {
+                    driver.SwitchTo().Window(originalWindowHandle);
+                    // Kiểm tra xem URL có thay đổi không, nếu có thì quay lại
+                    if (driver.Url != originalUrl)
+                    {
+                        Console.WriteLine($"[AdLink] Phát hiện URL gốc đã thay đổi, quay lại URL gốc");
+                        driver.Navigate().GoToUrl(originalUrl);
+                        System.Threading.Thread.Sleep(1000);
+                    }
+                }
+                catch
+                {
+                    // Nếu tab gốc không còn, tìm lại tab đầu tiên
+                    if (driver.WindowHandles.Count > 0)
+                    {
+                        driver.SwitchTo().Window(driver.WindowHandles[0]);
+                    }
+                }
+                
+                Console.WriteLine($"[AdLink] Hoàn thành xử lý {processedCount}/{bannerElements.Count} banner(s) có ảnh và external cho host={hostLabel}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[AdLink] Lỗi xử lý links: {ex.Message}");
+                Console.WriteLine($"[AdLink] Lỗi xử lý iframe: {ex.Message}");
                 ErrorWriter.WriteLog(LogPath, "ProcessIframesAndPushToQueue", $"{hostLabel} => {ex}");
                 TelegramService.PushLogToTelegram($"ProcessIframesAndPushToQueue Error - {hostLabel}", ex);
+            }
+        }
+        
+        /// <summary>
+        /// Kiểm tra xem trang hiện tại có chứa ít nhất 1 ảnh không
+        /// </summary>
+        private static bool CheckPageHasImages(IWebDriver driver)
+        {
+            try
+            {
+                // Kiểm tra bằng JavaScript
+                var js = (IJavaScriptExecutor)driver;
+                
+                // 1. Đếm số lượng thẻ <img> có src hợp lệ
+                var imgCount = (long)js.ExecuteScript(@"
+                    var imgs = document.querySelectorAll('img[src]');
+                    var count = 0;
+                    for (var i = 0; i < imgs.length; i++) {
+                        var src = imgs[i].src;
+                        if (src && src.trim() !== '' && !src.startsWith('data:') && src !== 'about:blank') {
+                            count++;
+                        }
+                    }
+                    return count;
+                ");
+                
+                if (imgCount > 0)
+                {
+                    Console.WriteLine($"[AdLink] Tìm thấy {imgCount} ảnh từ thẻ <img>");
+                    return true;
+                }
+                
+                // 2. Kiểm tra background-image trong CSS
+                var bgImageCount = (long)js.ExecuteScript(@"
+                    var elements = document.querySelectorAll('*');
+                    var count = 0;
+                    for (var i = 0; i < elements.length; i++) {
+                        var style = window.getComputedStyle(elements[i]);
+                        var bgImage = style.backgroundImage;
+                        if (bgImage && bgImage !== 'none' && bgImage.includes('url(') && !bgImage.includes('data:')) {
+                            count++;
+                        }
+                    }
+                    return count;
+                ");
+                
+                if (bgImageCount > 0)
+                {
+                    Console.WriteLine($"[AdLink] Tìm thấy {bgImageCount} element có background-image");
+                    return true;
+                }
+                
+                // 3. Kiểm tra trong HTML source có từ khóa liên quan đến ảnh
+                var htmlSource = driver.PageSource?.ToLowerInvariant() ?? "";
+                if (htmlSource.Contains("<img") || 
+                    htmlSource.Contains("background-image") || 
+                    htmlSource.Contains(".jpg") || 
+                    htmlSource.Contains(".jpeg") || 
+                    htmlSource.Contains(".png") || 
+                    htmlSource.Contains(".gif") || 
+                    htmlSource.Contains(".webp") ||
+                    htmlSource.Contains("image") ||
+                    htmlSource.Contains("picture"))
+                {
+                    Console.WriteLine($"[AdLink] Tìm thấy dấu hiệu ảnh trong HTML source");
+                    return true;
+                }
+                
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AdLink] Lỗi khi kiểm tra ảnh: {ex.Message}");
+                // Nếu có lỗi, giả định là có ảnh để an toàn
+                return true;
             }
         }
         
@@ -2333,6 +2826,4 @@ namespace ConsummerScreenPageBot
             }
         }
     }
-
-    
 }
