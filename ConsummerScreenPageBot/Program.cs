@@ -30,6 +30,7 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using SixLabors.ImageSharp.Formats.Jpeg;
+using System.Diagnostics;
 
 namespace ConsummerScreenPageBot
 {
@@ -1052,7 +1053,7 @@ namespace ConsummerScreenPageBot
                     var iframes = driver.FindElements(By.TagName("iframe"));
                     Console.WriteLine($"[AdLink] Tìm thấy {iframes.Count} iframe(s) trên trang");
                     foreach (var iframe in iframes)
-                    {
+                {
                         try
                         {
                             // Kiểm tra kích thước và vị trí của iframe (chỉ lấy iframe có kích thước hợp lý)
@@ -1065,13 +1066,13 @@ namespace ConsummerScreenPageBot
                             ", iframe);
                             
                             if (isVisible)
-                            {
+                        {
                                 bannerElements.Add(iframe);
-                            }
                         }
-                        catch { }
                     }
-                    
+                        catch { }
+                }
+                
                     // 2. Tìm element banner từ selector quảng cáo
                     var adSelectors = GetCommonAdSelectors();
                     Console.WriteLine($"[AdLink] Bắt đầu tìm element quảng cáo với {adSelectors.Length} selector(s)");
@@ -1084,7 +1085,7 @@ namespace ConsummerScreenPageBot
                             Console.WriteLine($"[AdLink] Selector '{selector}': tìm thấy {adElements.Count} element(s)");
                             
                             foreach (var element in adElements)
-                            {
+                {
                                 try
                                 {
                                     // Kiểm tra element có thể click được và có kích thước hợp lý
@@ -1100,10 +1101,10 @@ namespace ConsummerScreenPageBot
                                     ", element);
                                     
                                     if (isClickable)
-                                    {
+                        {
                                         bannerElements.Add(element);
-                                    }
-                                }
+                        }
+                    }
                                 catch { }
                             }
                         }
@@ -1135,7 +1136,7 @@ namespace ConsummerScreenPageBot
                 
                 // Click vào từng banner và thu thập link
                 foreach (var bannerElement in bannerElements)
-                {
+                        {
                     bannerIndex++;
                     try
                     {
@@ -1199,12 +1200,11 @@ namespace ConsummerScreenPageBot
                                 // Kiểm tra xem element có phải iframe không
                                 bool isIframe = bannerElement.TagName.ToLower() == "iframe";
                                 
+                                bool iframeClickedByViewport = false;
                                 if (isIframe)
                                 {
-                                    // Với iframe: click trực tiếp vào tọa độ của iframe trên trang chính
-                                    // Không lấy src vì có thể là container.html trống
-                                    Console.WriteLine($"[AdLink] Banner {bannerIndex} (iframe) -> Click vào tọa độ iframe ({centerX}, {centerY})");
-                                    // Không set targetUrl, sẽ click vào tọa độ sau
+                                    Console.WriteLine($"[AdLink] Banner {bannerIndex} (iframe) -> Thử click iframe tại ({centerX}, {centerY})");
+                                    iframeClickedByViewport = TryClickIframeElement(driver, bannerElement, centerX, centerY);
                                 }
                                 else
                                 {
@@ -1214,7 +1214,7 @@ namespace ConsummerScreenPageBot
                                         // Tìm link <a> bên trong element
                                         var links = bannerElement.FindElements(By.TagName("a"));
                                         foreach (var link in links)
-                                        {
+                {
                                             try
                                             {
                                                 string? href = link.GetAttribute("href");
@@ -1234,7 +1234,7 @@ namespace ConsummerScreenPageBot
                                         {
                                             string? dataHref = bannerElement.GetAttribute("data-href");
                                             if (!string.IsNullOrWhiteSpace(dataHref) && IsValidHttpLink(dataHref) && IsExternalLink(dataHref))
-                                            {
+                        {
                                                 targetUrl = dataHref;
                                                 shouldOpenUrl = true;
                                             }
@@ -1245,10 +1245,10 @@ namespace ConsummerScreenPageBot
                                                 {
                                                     targetUrl = dataUrl;
                                                     shouldOpenUrl = true;
-                                                }
-                                            }
-                                        }
-                                    }
+                            }
+                        }
+                    }
+                }
                                     catch (Exception ex)
                                     {
                                         Console.WriteLine($"[AdLink] Lỗi khi tìm link trong banner {bannerIndex}: {ex.Message}");
@@ -1260,7 +1260,7 @@ namespace ConsummerScreenPageBot
                                 {
                                     try
                                     {
-                                        if (isIframe)
+                                        if (isIframe && !iframeClickedByViewport)
                                         {
                                             // Với iframe: switch vào iframe và click bên trong
                                             // Cách này đảm bảo click được vào content bên trong iframe
@@ -1336,7 +1336,7 @@ namespace ConsummerScreenPageBot
                                                                         }
                                                                     }
                                                                     clickable = clickable.parentElement;
-                                                                }
+                            }
                                                                 
                                                                 // Nếu không tìm thấy link, thử click event
                                                                 var event = new MouseEvent('click', {
@@ -1366,9 +1366,9 @@ namespace ConsummerScreenPageBot
                                                         }
                                                     }
                                                     catch (Exception ex2)
-                                                    {
+                        {
                                                         Console.WriteLine($"[AdLink] Banner {bannerIndex} (iframe) -> Lỗi khi click trong iframe: {ex2.Message}");
-                                                    }
+                        }
                                                 }
                                                 
                                                 // Quay lại main content
@@ -1461,7 +1461,7 @@ namespace ConsummerScreenPageBot
                             try
                             {
                                 ((IJavaScriptExecutor)driver).ExecuteScript("window.open(arguments[0], '_blank');", targetUrl);
-                                System.Threading.Thread.Sleep(1500);
+                                System.Threading.Thread.Sleep(800);
                             }
                             catch (Exception ex)
                             {
@@ -1469,90 +1469,101 @@ namespace ConsummerScreenPageBot
                                 continue;
                             }
                         }
-                        else
-                        {
-                            // Đợi tab mới mở hoặc trang navigate sau khi click
-                            // Đợi lâu hơn để đảm bảo click được xử lý
-                            System.Threading.Thread.Sleep(3000);
-                        }
                         
-                        // Kiểm tra xem có tab mới không (kiểm tra nhiều lần với delay)
-                        var windowsAfter = driver.WindowHandles.Count;
-                        bool hasNewTab = false;
+                        string? newWindowHandle;
+                        bool hasNewTab = TryGetNewWindowHandle(driver, originalWindowHandle, windowsBefore, TimeSpan.FromSeconds(6), out newWindowHandle);
                         
-                        // Kiểm tra lại sau 1 giây nữa (một số trang load chậm)
-                        if (windowsAfter <= windowsBefore)
+                        TimeSpan pageLoadTimeout = TimeSpan.FromSeconds(6);
+
+                        if (hasNewTab && !string.IsNullOrWhiteSpace(newWindowHandle))
                         {
-                            System.Threading.Thread.Sleep(1000);
-                            windowsAfter = driver.WindowHandles.Count;
-                            hasNewTab = windowsAfter > windowsBefore;
-                        }
-                        else
-                        {
-                            hasNewTab = true;
-                        }
-                        
-                        if (hasNewTab)
-                        {
-                            // Chuyển sang tab mới
-                            var newWindowHandles = driver.WindowHandles.Where(h => !h.Equals(originalWindowHandle)).ToList();
-                            if (newWindowHandles.Count > 0)
+                            try
                             {
-                                string newWindowHandle = newWindowHandles[newWindowHandles.Count - 1];
                                 driver.SwitchTo().Window(newWindowHandle);
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[AdLink] Không thể switch sang tab mới: {ex.Message}");
+                                driver.SwitchTo().Window(originalWindowHandle);
+                                continue;
+                            }
+                            
+                            if (!WaitForPageLoad(driver, pageLoadTimeout))
+                            {
+                                Console.WriteLine($"[AdLink] Tab mới của banner {bannerIndex} load quá {pageLoadTimeout.TotalSeconds}s, đóng tab và bỏ qua");
+                                driver.Close();
+                                driver.SwitchTo().Window(originalWindowHandle);
+                                continue;
+                            }
+                            
+                            string clickedUrl = driver.Url;
+                            
+                            if (IsExternalLink(clickedUrl) && CheckPageHasImages(driver))
+                            {
+                                Console.WriteLine($"[AdLink] Banner {bannerIndex} -> Trang có ảnh và external, lưu link: {clickedUrl}");
                                 
-                                // Đợi 3 giây để trang load
-                                System.Threading.Thread.Sleep(3000);
-                                
-                                // Lấy URL và kiểm tra
-                                string clickedUrl = driver.Url;
-                                
-                                // Kiểm tra xem link có external không và có ảnh không
-                                if (IsExternalLink(clickedUrl) && CheckPageHasImages(driver))
-                                {
-                                    Console.WriteLine($"[AdLink] Banner {bannerIndex} -> Trang có ảnh và external, lưu link: {clickedUrl}");
-                                    PushIframeToQueue(clickedUrl, "", jobParamsSnapshot);
-                        processedCount++;
-                                }
-                                else
-                                {
-                                    if (!IsExternalLink(clickedUrl))
+                                    string screenshotBase64 = "";
+                                    if (IsFacebookLink(clickedUrl))
                                     {
-                                        Console.WriteLine($"[AdLink] Banner {bannerIndex} -> Link cùng domain, bỏ qua: {clickedUrl}");
+                                        CloseCommonPopups(driver);
+                                        System.Threading.Thread.Sleep(200);
+                                        var segments = AdCapture.CaptureSegmentScreenshots(driver);
+                                        if (segments.Length > 0)
+                                        {
+                                            screenshotBase64 = string.Join(",", segments);
+                                        }
                                     }
                                     else
                                     {
-                                        Console.WriteLine($"[AdLink] Banner {bannerIndex} -> Trang không có ảnh, bỏ qua: {clickedUrl}");
+                                        Console.WriteLine($"[AdLink] Banner {bannerIndex} -> Không phải Facebook, bỏ qua chụp screenshot");
                                     }
-                                }
                                 
-                                // Đóng tab mới và quay về tab gốc
-                                driver.Close();
-                                driver.SwitchTo().Window(originalWindowHandle);
-                                System.Threading.Thread.Sleep(500);
+                                    PushIframeToQueue(clickedUrl, screenshotBase64, jobParamsSnapshot);
+                        processedCount++;
                             }
+                            else
+                            {
+                                Console.WriteLine($"[AdLink] Banner {bannerIndex} -> Trang không đạt tiêu chí (external={IsExternalLink(clickedUrl)}), bỏ qua: {clickedUrl}");
+                            }
+                            
+                            driver.Close();
+                            driver.SwitchTo().Window(originalWindowHandle);
+                            System.Threading.Thread.Sleep(300);
                         }
                         else
                         {
-                            // Nếu không mở tab mới, có thể đã navigate trên tab hiện tại
-                            // Kiểm tra URL có thay đổi không
-                            string currentUrl = driver.Url;
-                            if (currentUrl != originalUrl)
+                            if (TryWaitForUrlChange(driver, originalUrl, TimeSpan.FromSeconds(5), out var currentUrl) && currentUrl != originalUrl)
                             {
-                                // Đợi 3 giây để trang load
-                                System.Threading.Thread.Sleep(3000);
-                                
-                                // Kiểm tra xem link có external không và có ảnh không
-                                if (IsExternalLink(currentUrl) && CheckPageHasImages(driver))
+                                if (!WaitForPageLoad(driver, pageLoadTimeout))
+                                {
+                                    Console.WriteLine($"[AdLink] Banner {bannerIndex} -> Trang mới load quá {pageLoadTimeout.TotalSeconds}s, quay lại trang gốc");
+                                }
+                                else if (IsExternalLink(currentUrl) && CheckPageHasImages(driver))
                                 {
                                     Console.WriteLine($"[AdLink] Banner {bannerIndex} -> Trang có ảnh và external, lưu link: {currentUrl}");
-                                    PushIframeToQueue(currentUrl, "", jobParamsSnapshot);
-                        processedCount++;
+                                    
+                                    string screenshotBase64 = "";
+                                    if (IsFacebookLink(currentUrl))
+                                    {
+                                        CloseCommonPopups(driver);
+                                        System.Threading.Thread.Sleep(200);
+                                        var segments = AdCapture.CaptureSegmentScreenshots(driver);
+                                        if (segments.Length > 0)
+                                        {
+                                            screenshotBase64 = string.Join(",", segments);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        Console.WriteLine($"[AdLink] Banner {bannerIndex} -> Không phải Facebook, bỏ qua chụp screenshot");
+                                    }
+                                    
+                                    PushIframeToQueue(currentUrl, screenshotBase64, jobParamsSnapshot);
+                                    processedCount++;
                                 }
                                 
-                                // Quay lại trang gốc
                                 driver.Navigate().GoToUrl(originalUrl);
-                                System.Threading.Thread.Sleep(1000);
+                                System.Threading.Thread.Sleep(500);
                             }
                             else
                             {
@@ -1686,6 +1697,245 @@ namespace ConsummerScreenPageBot
                 return true;
             }
         }
+
+        private static bool IsFacebookLink(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return false;
+            var lower = url.ToLowerInvariant();
+            return lower.Contains("facebook.com") || lower.Contains("fb.com") || lower.Contains("fb.me");
+        }
+        
+        /// <summary>
+        /// Thử đóng các popup phổ biến trên trang đích trước khi chụp screenshot
+        /// </summary>
+        private static void CloseCommonPopups(IWebDriver driver)
+        {
+            try
+            {
+                var js = driver as IJavaScriptExecutor;
+                bool foundPopup = false;
+                var selectors = new[]
+                {
+                    "button[aria-label*='close']",
+                    "button[aria-label*='Close']",
+                    "button[aria-label*='Đóng']",
+                    "div[role='button'][aria-label*='close']",
+                    "div[role='button'][aria-label*='Close']",
+                    "[data-dismiss='modal']",
+                    ".modal-close, .modal__close, .close-button, .popup-close, .btn-close, .c-modal__close",
+                    ".ant-modal-close, .ant-modal-close-x, .ant-modal-close-icon",
+                    ".mfp-close, .fancybox-button--close, .fancybox-close-small",
+                    ".pswp__button--close",
+                    ".close, .Close"
+                };
+
+                foreach (var selector in selectors)
+                {
+                    IReadOnlyCollection<IWebElement> elements;
+                    try
+                    {
+                        elements = driver.FindElements(By.CssSelector(selector));
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+
+                    if (elements.Count == 0) continue;
+                    foundPopup = true;
+
+                    foreach (var element in elements)
+                    {
+                        try
+                        {
+                            if (!element.Displayed || !element.Enabled) continue;
+
+                            try
+                            {
+                                element.Click();
+                            }
+                            catch
+                            {
+                                js?.ExecuteScript("arguments[0].click();", element);
+                            }
+
+                            Console.WriteLine($"[AdLink] Đã đóng popup bằng selector: {selector}");
+                            System.Threading.Thread.Sleep(200);
+                            break; // đủ đóng 1 popup theo selector
+                        }
+                        catch { }
+                    }
+                }
+
+                // Nếu chưa thấy popup nào, thử kiểm tra overlay
+                if (!foundPopup)
+                {
+                    IReadOnlyCollection<IWebElement>? overlays = null;
+                    try
+                    {
+                        overlays = driver.FindElements(By.CssSelector(".modal-backdrop, .ant-modal-mask, .overlay, .backdrop, .ReactModal__Overlay"));
+                    }
+                    catch { }
+
+                    if (overlays != null && overlays.Count > 0)
+                    {
+                        foundPopup = true;
+                        foreach (var overlay in overlays)
+                        {
+                            try
+                            {
+                                if (!overlay.Displayed) continue;
+                                js?.ExecuteScript("arguments[0].click();", overlay);
+                                Console.WriteLine("[AdLink] Đã click overlay/backdrop để đóng popup");
+                                break;
+                            }
+                            catch { }
+                        }
+                    }
+                }
+
+                if (!foundPopup)
+                {
+                    Console.WriteLine("[AdLink] Không phát hiện popup, bỏ qua bước đóng");
+                    return;
+                }
+
+                // Gửi phím ESC như fallback
+                try
+                {
+                    new Actions(driver).SendKeys(Keys.Escape).Perform();
+                    Console.WriteLine("[AdLink] Gửi phím ESC để đóng popup");
+                }
+                catch { }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AdLink] Lỗi khi đóng popup trang đích: {ex.Message}");
+            }
+        }
+        
+        private static bool TryClickIframeElement(IWebDriver driver, IWebElement iframeElement, int centerX, int centerY)
+        {
+            bool clicked = false;
+            try
+            {
+                var actions = new Actions(driver);
+                actions.MoveToElement(iframeElement, iframeElement.Size.Width / 2, iframeElement.Size.Height / 2)
+                       .Click()
+                       .Perform();
+                clicked = true;
+                Console.WriteLine("[AdLink] Đã click iframe bằng Actions tại center");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AdLink] Click iframe bằng Actions thất bại: {ex.Message}");
+            }
+
+            if (!clicked)
+            {
+                try
+                {
+                    var js = (IJavaScriptExecutor)driver;
+                    js.ExecuteScript(@"
+                        var x = arguments[0];
+                        var y = arguments[1];
+                        var element = document.elementFromPoint(x, y);
+                        if (element) {
+                            var evt = new MouseEvent('click', {
+                                view: window,
+                                bubbles: true,
+                                cancelable: true,
+                                clientX: x,
+                                clientY: y,
+                                button: 0
+                            });
+                            element.dispatchEvent(evt);
+                            return true;
+                        }
+                        return false;
+                    ", centerX, centerY);
+                    clicked = true;
+                    Console.WriteLine("[AdLink] Đã click iframe bằng JavaScript (viewport)");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[AdLink] Click iframe bằng JavaScript thất bại: {ex.Message}");
+                }
+            }
+
+            return clicked;
+        }
+
+        private static bool TryGetNewWindowHandle(IWebDriver driver, string originalHandle, int originalCount, TimeSpan timeout, out string? newHandle)
+        {
+            newHandle = null;
+            var sw = Stopwatch.StartNew();
+            while (sw.Elapsed < timeout)
+            {
+                try
+                {
+                    var handles = driver.WindowHandles.ToList();
+                    if (handles.Count > originalCount)
+                    {
+                        newHandle = handles.LastOrDefault(h => h != originalHandle);
+                        return newHandle != null;
+                    }
+                }
+                catch (WebDriverException ex)
+                {
+                    Console.WriteLine($"[AdLink] Lỗi khi đọc window handles: {ex.Message}, thử lại...");
+                }
+                System.Threading.Thread.Sleep(250);
+            }
+            return false;
+        }
+
+        private static bool TryWaitForUrlChange(IWebDriver driver, string originalUrl, TimeSpan timeout, out string newUrl)
+        {
+            newUrl = originalUrl;
+            var sw = Stopwatch.StartNew();
+            while (sw.Elapsed < timeout)
+            {
+                try
+                {
+                    var currentUrl = driver.Url;
+                    if (!string.Equals(currentUrl, originalUrl, StringComparison.OrdinalIgnoreCase))
+                    {
+                        newUrl = currentUrl;
+                        return true;
+                    }
+                }
+                catch (WebDriverException ex)
+                {
+                    Console.WriteLine($"[AdLink] Lỗi khi đọc URL: {ex.Message}, thử lại...");
+                }
+                System.Threading.Thread.Sleep(250);
+            }
+            return false;
+        }
+
+        private static bool WaitForPageLoad(IWebDriver driver, TimeSpan timeout)
+        {
+            var js = driver as IJavaScriptExecutor;
+            var sw = Stopwatch.StartNew();
+            while (sw.Elapsed < timeout)
+            {
+                try
+                {
+                    var state = js?.ExecuteScript("return document.readyState")?.ToString();
+                    if (state == "complete" || state == "interactive")
+                    {
+                        return true;
+                    }
+                }
+                catch (WebDriverException ex)
+                {
+                    Console.WriteLine($"[AdLink] Lỗi khi kiểm tra document.readyState: {ex.Message}, thử lại...");
+                }
+                System.Threading.Thread.Sleep(500);
+            }
+            return false;
+        }
         
         /// <summary>
         /// Push link iframe vào RabbitMQ queue RabbitQueueAnalyzeSingleBanner
@@ -1695,13 +1945,13 @@ namespace ConsummerScreenPageBot
         /// 2. Tạo JSON payload: 
         ///    - Merge tất cả thông tin từ job params gốc (link_web, slice, quanlity_image, device, ...)
         ///    - Thêm "link_click_banner": "{link}"
-        ///    - Thêm "screenshot_base64": "" (luôn rỗng)
+        ///    - Thêm "screenshot_base64": "{base64_string}"
         /// 3. Đảm bảo kết nối RabbitMQ đã sẵn sàng
         /// 4. Push message lên queue với persistent = true
         /// 
         /// Tham số:
         /// - linkClick: Link click của iframe/quảng cáo
-        /// - screenshotBase64: Luôn để rỗng (không chụp ảnh nữa)
+        /// - screenshotBase64: Base64 string của screenshot (từ CaptureFullPageScreenshot)
         /// - jobParamsSnapshot: Thông tin từ job gốc (RabbitQueue) để merge vào payload
         /// </summary>
         private static void PushIframeToQueue(string linkClick, string screenshotBase64, JObject? jobParamsSnapshot = null)
@@ -1711,10 +1961,17 @@ namespace ConsummerScreenPageBot
             
                 // Gửi link tới queue screen link để job chụp ảnh từ link click xử lý
                 var targetQueue = RabbitQueueScreenLink; // Queue name này dùng để nhận dữ liệu từ link click banner
+                Console.WriteLine($"[Iframe] Chuẩn bị push queue. Queue='{targetQueue}', Link='{linkClick}', ScreenshotLen={(screenshotBase64?.Length ?? 0)}");
                 
                 if (string.IsNullOrWhiteSpace(linkClick))
                 {
                     Console.WriteLine("[Iframe] Link click rỗng, bỏ qua");
+                    return;
+                }
+                
+                if (string.IsNullOrWhiteSpace(targetQueue))
+                {
+                    Console.WriteLine("[Iframe] RabbitQueueScreenLink chưa được cấu hình, không thể push");
                     return;
                 }
                 
@@ -1736,12 +1993,13 @@ namespace ConsummerScreenPageBot
                     mergedPayload = new JObject();
                 }
                 
-                // Thêm link_click_banner và screenshot_base64 (ghi đè nếu có trong job params)
+                // Thêm link_click_banner, screenshot_base64 và page_source (ghi đè nếu có trong job params)
                 mergedPayload["link_click_banner"] = linkClick ?? "";
-                mergedPayload["screenshot_base64"] = ""; // Luôn để rỗng
+                mergedPayload["screenshot_base64"] = screenshotBase64 ?? "";
                 
                 var jsonPayload = mergedPayload.ToString(Newtonsoft.Json.Formatting.None);
                 var body = Encoding.UTF8.GetBytes(jsonPayload);
+                Console.WriteLine($"[Iframe] Payload chuẩn bị gửi có size={body.Length} bytes");
                 
                 // Debug: Log payload để kiểm tra
                 try
@@ -1753,6 +2011,7 @@ namespace ConsummerScreenPageBot
                 
                 // Đảm bảo kết nối RabbitMQ sẵn sàng với queue name từ config
                 EnsureIframePublisherReady(targetQueue);
+                Console.WriteLine($"[Iframe] Kiểm tra channel RabbitMQ: {(iframeChannel != null ? (iframeChannel.IsOpen ? "Đang mở" : "Đang đóng") : "NULL")}");
                 
                 if (iframeChannel == null || !iframeChannel.IsOpen)
                 {
@@ -1773,6 +2032,7 @@ namespace ConsummerScreenPageBot
             catch (Exception ex)
             {
                 Console.WriteLine($"[Iframe] Lỗi push vào queue: {ex.Message}");
+                Console.WriteLine($"[Iframe] Thông tin debug -> Link: {linkClick}, ScreenshotLen: {(screenshotBase64?.Length ?? 0)}");
                 ErrorWriter.WriteLog(LogPath, "PushIframeToQueue", ex.ToString());
             }
         }
