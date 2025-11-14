@@ -216,8 +216,8 @@ namespace ConsummerScreenPageBot.Device
                 try { Console.WriteLine($"[Mobile Segment] Done host={hostLabel}"); } catch { }
                 
                 // Sau khi chụp segment xong, xử lý tất cả iframe và push vào queue
-                //Console.WriteLine("[Mobile] Bắt đầu xử lý iframe sau khi chụp segment...");
-                //Program.ProcessIframesAndPushToQueue(driver, hostLabel);
+                Console.WriteLine("[Mobile] Bắt đầu xử lý iframe sau khi chụp segment...");
+                Program.ProcessIframesAndPushToQueue(driver, hostLabel);
             }
             catch (Exception ex)
             {
