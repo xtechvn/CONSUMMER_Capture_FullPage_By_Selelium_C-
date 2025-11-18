@@ -3,3 +3,5 @@
 bin/
 obj/
 chrome-profile/
+logs/
+screenshots/
