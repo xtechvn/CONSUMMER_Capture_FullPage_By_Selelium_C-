@@ -177,6 +177,20 @@ namespace ConsummerScreenPageBot
                 Console.WriteLine("ChromeDriver NuGet version: " + driverVersion);
 
              
+                // Đảm bảo thư mục log tồn tại trước khi yêu cầu ChromeDriver ghi log
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(LogPath))
+                    {
+                        Directory.CreateDirectory(LogPath);
+                    }
+                }
+                catch (Exception logDirEx)
+                {
+                    Console.WriteLine($"[Chrome] Cannot prepare log directory '{LogPath}': {logDirEx.Message}");
+                    throw;
+                }
+
                 // Tạo ChromeDriverService và bật ghi log chi tiết để dễ debug khi lỗi phiên làm việc/khởi tạo
                 var service = ChromeDriverService.CreateDefaultService();
                 service.EnableVerboseLogging = true;
@@ -3484,6 +3498,7 @@ namespace ConsummerScreenPageBot
             var js = (IJavaScriptExecutor)driver;
             long lastHeight = 0;
             int stableRounds = 0;
+            int fallbackAttempts = 0;
             var deadline = DateTime.UtcNow + maxWait;
 
             try
@@ -3491,6 +3506,8 @@ namespace ConsummerScreenPageBot
                 lastHeight = Convert.ToInt64(js.ExecuteScript("return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight) || 0;"));
             }
             catch { }
+
+            ForceEnableBodyScroll(driver);
 
             while (DateTime.UtcNow < deadline)
             {
@@ -3512,6 +3529,27 @@ namespace ConsummerScreenPageBot
                 if (newHeight <= lastHeight)
                 {
                     stableRounds++;
+
+                    if (stableRounds >= 2 && fallbackAttempts < 4)
+                    {
+                        Console.WriteLine($"[ScrollFallback] Trang không tăng chiều cao sau {stableRounds} vòng. Thử fallback #{fallbackAttempts + 1}...");
+
+                        ForceEnableBodyScroll(driver);
+                        bool containerScrolled = TryScrollScrollableContainers(driver);
+                        if (!containerScrolled)
+                        {
+                            Console.WriteLine("[ScrollFallback] Không tìm thấy container scrollable hoặc không scroll được. Thử gửi wheel event/PageDown...");
+                            TryDispatchWheelFallback(driver);
+                        }
+                        else
+                        {
+                            Console.WriteLine("[ScrollFallback] Đã scroll trong container nội bộ.");
+                        }
+
+                        stableRounds = 0;
+                        fallbackAttempts++;
+                        continue;
+                    }
                 }
                 else
                 {
@@ -3522,8 +3560,134 @@ namespace ConsummerScreenPageBot
                 if (stableRounds >= 3) break;
             }
 
+            if (fallbackAttempts > 0)
+            {
+                Console.WriteLine($"[ScrollFallback] Tổng số lần fallback đã thực hiện: {fallbackAttempts}");
+            }
+
             // Một lần chờ ngắn để JS còn lại hoàn tất
             WaitForReadyState(driver, TimeSpan.FromSeconds(2));
+        }
+
+        private static void ForceEnableBodyScroll(IWebDriver driver)
+        {
+            var js = (IJavaScriptExecutor)driver;
+            try
+            {
+                js.ExecuteScript(@"
+                    try {
+                        document.body.style.overflow = 'auto';
+                        document.body.style.position = 'static';
+                    } catch(e) {}
+                    try {
+                        document.documentElement.style.overflow = 'auto';
+                        document.documentElement.style.position = 'static';
+                    } catch(e) {}
+                ");
+            }
+            catch { }
+        }
+
+        private static bool TryScrollScrollableContainers(IWebDriver driver)
+        {
+            var js = (IJavaScriptExecutor)driver;
+            try
+            {
+                var result = js.ExecuteScript(@"
+                    let scrolled = false;
+                    const candidates = Array.from(document.querySelectorAll('*'));
+                    for (const el of candidates) {
+                        try {
+                            const style = window.getComputedStyle(el);
+                            if (!style) continue;
+                            const overflowY = style.overflowY || style.overflow;
+                            const canScroll = (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay');
+                            if (!canScroll) continue;
+                            const maxScroll = el.scrollHeight - el.clientHeight;
+                            if (maxScroll > 20) {
+                                const before = el.scrollTop;
+                                el.scrollTop = el.scrollHeight;
+                                if (Math.abs(el.scrollTop - before) > 5) {
+                                    scrolled = true;
+                                }
+                            }
+                        } catch {}
+                    }
+                    return scrolled;
+                ");
+                return result is bool b && b;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void TryDispatchWheelFallback(IWebDriver driver, int deltaY = 800)
+        {
+            bool success = false;
+            try
+            {
+                new Actions(driver).ScrollByAmount(0, deltaY).Perform();
+                success = true;
+                Console.WriteLine("[ScrollFallback] Đã scroll bằng Actions.ScrollByAmount");
+            }
+            catch { }
+
+            if (!success)
+            {
+                try
+                {
+                    new Actions(driver).SendKeys(Keys.PageDown).Perform();
+                    success = true;
+                    Console.WriteLine("[ScrollFallback] Đã scroll bằng phím PageDown");
+                }
+                catch { }
+            }
+
+            if (!success)
+            {
+                try
+                {
+                    var js = (IJavaScriptExecutor)driver;
+                    int centerX = 500;
+                    int centerY = 500;
+                    try
+                    {
+                        var dict = js.ExecuteScript("return { x: Math.floor(window.innerWidth/2), y: Math.floor(window.innerHeight/2) };") as Dictionary<string, object>;
+                        if (dict != null)
+                        {
+                            centerX = Convert.ToInt32(dict["x"]);
+                            centerY = Convert.ToInt32(dict["y"]);
+                        }
+                    }
+                    catch { }
+
+                    var chrome = driver as ChromeDriver;
+                    if (chrome != null)
+                    {
+                        chrome.ExecuteCdpCommand("Input.dispatchMouseWheelEvent", new Dictionary<string, object>
+                        {
+                            { "type", "mouseWheel" },
+                            { "x", centerX },
+                            { "y", centerY },
+                            { "deltaX", 0 },
+                            { "deltaY", deltaY }
+                        });
+                        Console.WriteLine("[ScrollFallback] Đã gửi Input.dispatchMouseWheelEvent qua CDP");
+                        success = true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[ScrollFallback] Lỗi khi gửi wheel event qua CDP: {ex.Message}");
+                }
+            }
+
+            if (!success)
+            {
+                Console.WriteLine("[ScrollFallback] Tất cả phương án scroll fallback đều thất bại");
+            }
         }
 
         /// <summary>
