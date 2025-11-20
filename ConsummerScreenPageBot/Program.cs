@@ -1754,202 +1754,521 @@ namespace ConsummerScreenPageBot
         }
         
         /// <summary>
+        /// Thử đóng popup bằng cách click vào nút close (icon X hoặc class = close)
+        /// </summary>
+        private static void TryClosePopup(IWebDriver driver)
+        {
+            try
+            {
+                var js = (IJavaScriptExecutor)driver;
+                var script = @"
+                    (function() {
+                        // Tìm các nút close có icon X hoặc class chứa 'close'
+                        var closeSelectors = [
+                            'button[aria-label*=""close""]',
+                            'button[aria-label*=""Close""]',
+                            'button[aria-label*=""Đóng""]',
+                            '.close', '.Close', '.close-button', '.popup-close', '.btn-close',
+                            '[class*=""close""]', '[class*=""Close""]',
+                            'button.close', 'span.close', 'div.close', 'a.close'
+                        ];
+                        
+                        for (var i = 0; i < closeSelectors.length; i++) {
+                            try {
+                                var elements = document.querySelectorAll(closeSelectors[i]);
+                                for (var j = 0; j < elements.length; j++) {
+                                    var el = elements[j];
+                                    var style = window.getComputedStyle(el);
+                                    if (style && style.display !== 'none' && style.visibility !== 'hidden') {
+                                        var rect = el.getBoundingClientRect();
+                                        // Chỉ click nếu element visible và có kích thước hợp lý
+                                        if (rect.width > 0 && rect.height > 0) {
+                                            el.click();
+                                            return true; // Đã click thành công
+                                        }
+                                    }
+                                }
+                            } catch(e) {}
+                        }
+                        return false; // Không tìm thấy nút close
+                    })();
+                ";
+                var clicked = js.ExecuteScript(script);
+                if (clicked != null && Convert.ToBoolean(clicked))
+                {
+                    Console.WriteLine($"[AdLink] [TryClosePopup] Đã click vào nút close để đóng popup");
+                    System.Threading.Thread.Sleep(300); // Đợi popup đóng
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AdLink] [TryClosePopup] Lỗi khi đóng popup: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Tìm email hoặc số điện thoại trên trang và scroll viewport tới vị trí phần tử đó nếu tìm thấy
+        /// </summary>
+        private static bool TryScrollToContactInfo(IWebDriver driver)
+        {
+            try
+            {
+                var js = (IJavaScriptExecutor)driver;
+                var result = js.ExecuteScript(@"
+                    (function() {
+                        const emailRegex = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+                        const phoneRegex = /(\+?\d{1,3}[\s\-\.]?)?(\(?\d{2,4}\)?[\s\-\.]?){2,4}\d{2,4}/;
+                        const selectors = 'a, span, div, p, li, strong, b, h1, h2, h3, h4, h5, h6';
+                        const nodes = Array.from(document.querySelectorAll(selectors));
+                        const scrollY = window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0;
+
+                        for (const node of nodes) {
+                            if (!node || !node.innerText) continue;
+                            const text = node.innerText.trim();
+                            if (!text) continue;
+                            if (text.length > 200) continue;
+                            if (emailRegex.test(text) || phoneRegex.test(text)) {
+                                const rect = node.getBoundingClientRect();
+                                return {
+                                    found: true,
+                                    top: rect.top + scrollY,
+                                    height: rect.height,
+                                    text: text.substring(0, 120)
+                                };
+                            }
+                        }
+                        return { found: false };
+                    })();
+                ") as IDictionary<string, object>;
+
+                if (result != null && result.TryGetValue("found", out var foundObj) && Convert.ToBoolean(foundObj))
+                {
+                    double targetTop = 0;
+                    if (result.TryGetValue("top", out var topObj))
+                    {
+                        double.TryParse(Convert.ToString(topObj), out targetTop);
+                    }
+                    double offset = 120;
+                    var finalY = Math.Max(0, targetTop - offset);
+                    js.ExecuteScript("window.scrollTo(0, arguments[0]);", finalY);
+                    if (result.TryGetValue("text", out var textObj))
+                    {
+                        Console.WriteLine($"[AdLink] [TryScrollToContactInfo] Đã tìm thấy contact info: {textObj}");
+                    }
+                    System.Threading.Thread.Sleep(300);
+                    return true;
+                }
+
+                Console.WriteLine("[AdLink] [TryScrollToContactInfo] Không tìm thấy email/số điện thoại, giữ nguyên logic cũ");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AdLink] [TryScrollToContactInfo] Lỗi: {ex.Message}");
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Scroll viewport tới sát cuối trang để đảm bảo footer hiển thị trên màn hình
+        /// </summary>
+        private static void ScrollViewportToBottom(IWebDriver driver)
+        {
+            try
+            {
+                var js = (IJavaScriptExecutor)driver;
+                var totalHeight = Convert.ToDouble(js.ExecuteScript("return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight, document.body.offsetHeight, document.documentElement.offsetHeight, document.body.clientHeight, document.documentElement.clientHeight) || 0;"));
+                var viewportHeight = Convert.ToDouble(js.ExecuteScript("return window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight || 0;"));
+                var targetY = Math.Max(0, totalHeight - viewportHeight);
+                js.ExecuteScript("window.scrollTo(0, arguments[0]);", targetY);
+                System.Threading.Thread.Sleep(400);
+                try { js.ExecuteScript("window.scrollBy(0, -20);"); } catch { }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AdLink] [ScrollViewportToBottom] Lỗi khi scroll xuống cuối trang: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Đảm bảo viewport thực sự đang ở sát cuối trang (scrollY + viewportHeight ~ totalHeight)
+        /// </summary>
+        private static bool EnsureViewportAtBottom(IWebDriver driver, int retries = 3, int settleDelayMs = 300)
+        {
+            try
+            {
+                var js = (IJavaScriptExecutor)driver;
+                for (int attempt = 1; attempt <= retries; attempt++)
+                {
+                    double totalHeight = Convert.ToDouble(js.ExecuteScript("return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight) || 0;"));
+                    double viewportHeight = Convert.ToDouble(js.ExecuteScript("return window.innerHeight || document.documentElement.clientHeight || 0;"));
+                    double scrollY = Convert.ToDouble(js.ExecuteScript("return window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0;"));
+
+                    if (scrollY + viewportHeight >= totalHeight - 5)
+                    {
+                        Console.WriteLine($"[AdLink] [EnsureViewportAtBottom] Đã ở sát cuối trang (attempt {attempt})");
+                        return true;
+                    }
+
+                    var targetY = Math.Max(0, totalHeight - viewportHeight);
+                    Console.WriteLine($"[AdLink] [EnsureViewportAtBottom] Chưa tới cuối trang (attempt {attempt}), scrollY={scrollY}, total={totalHeight}. Đang scroll tới {targetY}");
+                    js.ExecuteScript("window.scrollTo(0, arguments[0]);", targetY);
+                    System.Threading.Thread.Sleep(Math.Max(200, settleDelayMs));
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AdLink] [EnsureViewportAtBottom] Lỗi: {ex.Message}");
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Chụp ảnh viewport hiện tại và trả về byte array
+        /// </summary>
+        private static byte[] CaptureCurrentViewportScreenshot(IWebDriver driver)
+        {
+            byte[] screenshotBytes = Array.Empty<byte>();
+            var chrome = driver as ChromeDriver;
+            bool success = false;
+
+            if (chrome != null)
+            {
+                try
+                {
+                    var args = new Dictionary<string, object>
+                    {
+                        { "format", "jpeg" },
+                        { "quality", 100 },
+                        { "captureBeyondViewport", false }
+                    };
+                    var result = chrome.ExecuteCdpCommand("Page.captureScreenshot", args) as IDictionary<string, object>;
+                    if (result != null && result.TryGetValue("data", out var dataObj) && dataObj is string base64)
+                    {
+                        screenshotBytes = Convert.FromBase64String(base64);
+                        success = screenshotBytes != null && screenshotBytes.Length > 0;
+                    }
+                }
+                catch { }
+
+                if (!success)
+                {
+                    try
+                    {
+                        var shot = ((ITakesScreenshot)driver).GetScreenshot();
+                        screenshotBytes = shot.AsByteArray;
+                        success = screenshotBytes != null && screenshotBytes.Length > 0;
+                    }
+                    catch { }
+                }
+            }
+            else
+            {
+                try
+                {
+                    var shot = ((ITakesScreenshot)driver).GetScreenshot();
+                    screenshotBytes = shot.AsByteArray;
+                    success = screenshotBytes != null && screenshotBytes.Length > 0;
+                }
+                catch { }
+            }
+
+            return success && screenshotBytes != null && screenshotBytes.Length > 0 ? screenshotBytes : Array.Empty<byte>();
+        }
+
+        /// <summary>
+        /// Kiểm tra xem trang có menu/link đến /lien-he không
+        /// </summary>
+        private static bool HasLienHeMenu(IWebDriver driver, out string? lienHeUrl)
+        {
+            lienHeUrl = null;
+            try
+            {
+                var js = (IJavaScriptExecutor)driver;
+                var currentUrl = driver.Url;
+                var uri = new Uri(currentUrl);
+                var baseUrl = $"{uri.Scheme}://{uri.Host}";
+
+                var script = @"
+                    (function() {
+                        var links = document.querySelectorAll('a[href*=""lien-he""], a[href*=""contact""], a[href*=""lienhe""]');
+                        for (var i = 0; i < links.length; i++) {
+                            var href = links[i].getAttribute('href');
+                            if (href && (href.includes('/lien-he') || href.includes('/contact') || href.includes('/lienhe'))) {
+                                return href;
+                            }
+                        }
+                        return null;
+                    })();
+                ";
+
+                var result = js.ExecuteScript(script);
+                if (result != null && !string.IsNullOrWhiteSpace(result.ToString()))
+                {
+                    var href = result.ToString() ?? "";
+                    if (!string.IsNullOrWhiteSpace(href) && (href.StartsWith("http://") || href.StartsWith("https://")))
+                    {
+                        lienHeUrl = href;
+                    }
+                    else if (href.StartsWith("/"))
+                    {
+                        lienHeUrl = baseUrl + href;
+                    }
+                    else
+                    {
+                        lienHeUrl = baseUrl + "/" + href;
+                    }
+                    Console.WriteLine($"[AdLink] [HasLienHeMenu] Tìm thấy menu /lien-he: {lienHeUrl}");
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AdLink] [HasLienHeMenu] Lỗi khi kiểm tra menu /lien-he: {ex.Message}");
+            }
+            return false;
+        }
+
+        /// <summary>
         /// Chụp toàn bộ màn hình trang web và chuyển sang base64 string
-        /// Áp dụng logic tương tự ScreenDesktop.cs: scroll xuống cuối, scroll lên đầu, đợi ads load, rồi chụp
-        /// 
-        /// Cách thức hoạt động:
-        /// 1. Scroll xuống cuối trang để kích hoạt lazy-loading
-        /// 2. Scroll ngược lại lên đầu trang một cách mượt mà
-        /// 3. Đợi quảng cáo load hoàn toàn
-        /// 4. Lấy kích thước thực tế của trang (width x height)
-        ///    - Giới hạn chiều cao tối đa 30000px
-        /// 5. Chụp ảnh toàn trang bằng CDP:
-        ///    - Đặt viewport theo kích thước tài liệu
-        ///    - Chụp ảnh full page bằng Page.captureScreenshot
-        ///    - Nếu CDP fail => fallback về ITakesScreenshot
-        /// 6. Nén ảnh với chất lượng JPEG (mặc định 80)
-        /// 7. Convert sang base64 string
-        /// 8. Reset viewport về kích thước ban đầu
+        /// Quy trình mới: Chụp 3 ảnh và ghép lại
+        /// 1. Chụp ảnh đầu tiên khi vào trang (đầu trang)
+        /// 2. Scroll tới cuối trang và chụp ảnh thứ 2
+        /// 3. Kiểm tra có menu /lien-he không, nếu có thì chuyển sang trang đó và chụp ảnh thứ 3
+        /// 4. Ghép 3 ảnh lại theo chiều dọc và convert sang base64
         /// 
         /// Tham số:
         /// - driver: WebDriver
         /// - jpegQuality: Chất lượng JPEG (1-100, mặc định 80)
         /// 
-        /// Trả về: Base64 string của ảnh, hoặc chuỗi rỗng nếu lỗi
+        /// Trả về: Base64 string của ảnh đã ghép, hoặc chuỗi rỗng nếu lỗi
         /// </summary>
         private static string CaptureFullPageScreenshotAsBase64(IWebDriver driver, long jpegQuality = 80)
         {
+            string? originalUrl = null;
             try
             {
-                Console.WriteLine($"[AdLink] [CaptureFullPage] Bắt đầu quy trình chụp full page screenshot...");
+                Console.WriteLine($"[AdLink] [CaptureFullPage] Bắt đầu quy trình chụp 3 ảnh và ghép lại...");
                 var js = (IJavaScriptExecutor)driver;
+                originalUrl = driver.Url;
                 
-                // Bước 1: Scroll xuống cuối trang để kích hoạt lazy-load (giống ScreenDesktop.cs)
-                Console.WriteLine($"[AdLink] [CaptureFullPage] Bước 1: Scroll xuống cuối trang để kích hoạt lazy-load...");
-                ScrollToBottomAndEnsureLazyContent(driver, TimeSpan.FromSeconds(10));
+                var screenshots = new List<byte[]>();
                 
-                // Bước 2: Scroll ngược lại lên đầu trang một cách mượt mà
-                Console.WriteLine($"[AdLink] [CaptureFullPage] Bước 2: Scroll ngược lại lên đầu trang...");
-                SmoothScrollToTopForScreenshot(driver);
+                // ========== BƯỚC 1: Chụp ảnh đầu tiên - màn hình cơ sở 1 (đầu trang) ==========
+                Console.WriteLine($"[AdLink] [CaptureFullPage] Bước 1: Chụp ảnh đầu tiên (màn hình cơ sở 1 - đầu trang)...");
                 
-                // Bước 3: Delay để đảm bảo tất cả dữ liệu đã load đầy đủ
-                Console.WriteLine($"[AdLink] [CaptureFullPage] Bước 3: Đợi nội dung load đầy đủ (2s)...");
-                System.Threading.Thread.Sleep(2000);
+                // Scroll lên đầu trang
+                try { js.ExecuteScript("window.scrollTo(0, 0);"); } catch { }
+                System.Threading.Thread.Sleep(300);
                 
-                // Bước 4: Đợi quảng cáo load hoàn toàn
-                Console.WriteLine($"[AdLink] [CaptureFullPage] Bước 4: Đợi quảng cáo load hoàn toàn...");
-                WaitForAdsLoaded(driver, TimeSpan.FromSeconds(8));
+                // Thử đóng popup nếu có
+                TryClosePopup(driver);
                 
-                // Bước 5: Delay thêm để đảm bảo banner quảng cáo đã render hoàn toàn
-                Console.WriteLine($"[AdLink] [CaptureFullPage] Bước 5: Delay thêm 1.5s để banner render hoàn toàn...");
-                System.Threading.Thread.Sleep(1500);
+                // Nếu tìm thấy email/sđt thì scroll tới đó trước khi chụp
+                var contactScrolled = TryScrollToContactInfo(driver);
+                if (!contactScrolled)
+                {
+                    try { js.ExecuteScript("window.scrollTo(0, 0);"); } catch { }
+                }
                 
-                // Bước 6: Lấy kích thước trang
-                Console.WriteLine($"[AdLink] [CaptureFullPage] Bước 6: Lấy kích thước trang...");
-                int pageWidth = 1920;
-                int totalHeight = 3000;
-                
+                // Chụp ảnh đầu tiên
                 try
                 {
-                    pageWidth = Convert.ToInt32(js.ExecuteScript("return Math.max(document.documentElement.scrollWidth, document.body.scrollWidth, window.innerWidth || 0);"));
-                    totalHeight = Convert.ToInt32(js.ExecuteScript("return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight, window.innerHeight || 0);"));
-                    Console.WriteLine($"[AdLink] [CaptureFullPage] Kích thước trang: {pageWidth}x{totalHeight}");
+                    var topBytes = ((ITakesScreenshot)driver).GetScreenshot().AsByteArray;
+                    if (topBytes != null && topBytes.Length > 0)
+                    {
+                        screenshots.Add(topBytes);
+                        Console.WriteLine($"[AdLink] [CaptureFullPage] Đã chụp ảnh 1, kích thước: {topBytes.Length} bytes");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[AdLink] [CaptureFullPage] WARNING: Không thể chụp ảnh 1");
+                    }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[AdLink] [CaptureFullPage] Lỗi khi lấy kích thước: {ex.Message}, dùng mặc định 1920x3000");
+                    Console.WriteLine($"[AdLink] [CaptureFullPage] Lỗi khi chụp ảnh 1: {ex.Message}");
                 }
                 
-                if (totalHeight <= 0) totalHeight = 3000;
-                totalHeight = Math.Min(totalHeight, 30000);
-                Console.WriteLine($"[AdLink] [CaptureFullPage] Kích thước sau xử lý: {pageWidth}x{totalHeight}");
+                // ========== BƯỚC 2: Scroll tới cuối trang và chụp ảnh thứ 2 ==========
+                Console.WriteLine($"[AdLink] [CaptureFullPage] Bước 2: Scroll tới cuối trang và chụp ảnh thứ 2...");
                 
-                // Bước 7: Chụp ảnh bằng CDP
-                Console.WriteLine($"[AdLink] [CaptureFullPage] Bước 7: Bắt đầu chụp ảnh bằng CDP...");
-                byte[] fullShotBytes = Array.Empty<byte>();
-                var chrome = driver as ChromeDriver;
-                bool fullOk = false;
-                
-                if (chrome != null)
+                // Scroll xuống cuối trang và đảm bảo đã load nội dung lazy
+                ScrollToBottomAndEnsureLazyContent(driver, TimeSpan.FromSeconds(6));
+                ScrollViewportToBottom(driver);
+                var contactBottom = TryScrollToContactInfo(driver);
+                if (!contactBottom)
                 {
-                    Console.WriteLine($"[AdLink] [CaptureFullPage] Sử dụng ChromeDriver với CDP...");
-                    var metrics = new Dictionary<string, object>
+                    var bottomReached = EnsureViewportAtBottom(driver);
+                    if (!bottomReached)
                     {
-                        { "mobile", false },
-                        { "width", Math.Max(1, pageWidth) },
-                        { "height", Math.Max(1, totalHeight) },
-                        { "deviceScaleFactor", 1 },
-                        { "scale", 1 }
-                    };
-                    try 
-                    { 
-                        chrome.ExecuteCdpCommand("Emulation.setDeviceMetricsOverride", metrics);
-                        Console.WriteLine($"[AdLink] [CaptureFullPage] Đã set device metrics override");
-                    } 
-                    catch (Exception ex) 
-                    { 
-                        Console.WriteLine($"[AdLink] [CaptureFullPage] Lỗi khi set device metrics: {ex.Message}");
+                        Console.WriteLine("[AdLink] [CaptureFullPage] Cảnh báo: chưa chắc chắn đang ở cuối trang, thử scroll thêm một lần nữa");
+                        ScrollViewportToBottom(driver);
+                        EnsureViewportAtBottom(driver);
                     }
-                    
-                    try 
-                    { 
-                        chrome.ExecuteCdpCommand("Page.enable", new Dictionary<string, object>());
-                        Console.WriteLine($"[AdLink] [CaptureFullPage] Đã enable Page");
-                    } 
-                    catch (Exception ex) 
-                    { 
-                        Console.WriteLine($"[AdLink] [CaptureFullPage] Lỗi khi enable Page: {ex.Message}");
+                }
+                System.Threading.Thread.Sleep(300);
+                
+                // Thử đóng popup nếu có
+                TryClosePopup(driver);
+                
+                // Chụp ảnh thứ 2
+                try
+                {
+                    var bottomBytes = ((ITakesScreenshot)driver).GetScreenshot().AsByteArray;
+                    if (bottomBytes != null && bottomBytes.Length > 0)
+                    {
+                        screenshots.Add(bottomBytes);
+                        Console.WriteLine($"[AdLink] [CaptureFullPage] Đã chụp ảnh 2, kích thước: {bottomBytes.Length} bytes");
                     }
-                    
+                    else
+                    {
+                        Console.WriteLine($"[AdLink] [CaptureFullPage] WARNING: Không thể chụp ảnh 2");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[AdLink] [CaptureFullPage] Lỗi khi chụp ảnh 2: {ex.Message}");
+                }
+                
+                // ========== BƯỚC 3: Kiểm tra có menu /lien-he không, nếu có thì chụp ảnh thứ 3 ==========
+                Console.WriteLine($"[AdLink] [CaptureFullPage] Bước 3: Kiểm tra menu /lien-he...");
+                
+                if (HasLienHeMenu(driver, out var lienHeUrl) && !string.IsNullOrWhiteSpace(lienHeUrl))
+                {
                     try
                     {
-                        var args = new Dictionary<string, object>
+                        Console.WriteLine($"[AdLink] [CaptureFullPage] Tìm thấy menu /lien-he, đang chuyển sang: {lienHeUrl}");
+                        
+                        // Navigate tới trang /lien-he
+                        if (TryNavigate(driver, lienHeUrl, TimeSpan.FromSeconds(30), out var navFailReason))
                         {
-                            { "format", "jpeg" },
-                            { "quality", Math.Clamp(jpegQuality, 1, 100) },
-                            { "captureBeyondViewport", true }
-                        };
-                        Console.WriteLine($"[AdLink] [CaptureFullPage] Gọi Page.captureScreenshot với quality={jpegQuality}...");
-                        var result = chrome.ExecuteCdpCommand("Page.captureScreenshot", args) as IDictionary<string, object>;
-                        if (result != null && result.TryGetValue("data", out var dataObj) && dataObj is string base64)
-                        {
-                            fullShotBytes = Convert.FromBase64String(base64);
-                            fullOk = fullShotBytes != null && fullShotBytes.Length > 0;
-                            Console.WriteLine($"[AdLink] [CaptureFullPage] CDP chụp thành công, kích thước: {fullShotBytes.Length} bytes");
+                            Console.WriteLine($"[AdLink] [CaptureFullPage] Đã navigate tới trang /lien-he thành công");
+                            System.Threading.Thread.Sleep(2000);
+                            
+                            // Scroll lên đầu trang /lien-he (màn hình cơ sở 1)
+                            try { js.ExecuteScript("window.scrollTo(0, 0);"); } catch { }
+                            System.Threading.Thread.Sleep(300);
+                            
+                            // Thử đóng popup nếu có
+                            TryClosePopup(driver);
+                            TryScrollToContactInfo(driver);
+                            
+                            // Chụp ảnh thứ 3
+                            try
+                            {
+                                var lienHeBytes = ((ITakesScreenshot)driver).GetScreenshot().AsByteArray;
+                                if (lienHeBytes != null && lienHeBytes.Length > 0)
+                                {
+                                    screenshots.Add(lienHeBytes);
+                                    Console.WriteLine($"[AdLink] [CaptureFullPage] Đã chụp ảnh 3 (trang /lien-he), kích thước: {lienHeBytes.Length} bytes");
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"[AdLink] [CaptureFullPage] WARNING: Không thể chụp ảnh 3");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[AdLink] [CaptureFullPage] Lỗi khi chụp ảnh 3: {ex.Message}");
+                            }
+                            
+                            // Quay lại trang gốc
+                            Console.WriteLine($"[AdLink] [CaptureFullPage] Quay lại trang gốc: {originalUrl}");
+                            if (!string.IsNullOrWhiteSpace(originalUrl))
+                            {
+                                TryNavigate(driver, originalUrl, TimeSpan.FromSeconds(30), out _);
+                            }
                         }
                         else
                         {
-                            Console.WriteLine($"[AdLink] [CaptureFullPage] CDP không trả về data hợp lệ");
+                            Console.WriteLine($"[AdLink] [CaptureFullPage] Không thể navigate tới trang /lien-he: {navFailReason}");
                         }
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[AdLink] [CaptureFullPage] Lỗi khi chụp bằng CDP: {ex.Message}");
-                        fullOk = false;
-                    }
-                    
-                    if (!fullOk)
-                    {
-                        Console.WriteLine($"[AdLink] [CaptureFullPage] Fallback: Thử chụp bằng ITakesScreenshot...");
-                        try
+                        Console.WriteLine($"[AdLink] [CaptureFullPage] Lỗi khi xử lý trang /lien-he: {ex.Message}");
+                        // Quay lại trang gốc nếu có lỗi
+                        if (!string.IsNullOrWhiteSpace(originalUrl))
                         {
-                            var shot = ((ITakesScreenshot)driver).GetScreenshot();
-                            fullShotBytes = shot.AsByteArray;
-                            fullOk = fullShotBytes != null && fullShotBytes.Length > 0;
-                            Console.WriteLine($"[AdLink] [CaptureFullPage] ITakesScreenshot chụp thành công, kích thước: {fullShotBytes.Length} bytes");
+                            try { TryNavigate(driver, originalUrl, TimeSpan.FromSeconds(30), out _); } catch { }
                         }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"[AdLink] [CaptureFullPage] ITakesScreenshot cũng fail: {ex.Message}");
-                            fullOk = false;
-                        }
-                    }
-                    
-                    try 
-                    { 
-                        chrome.ExecuteCdpCommand("Emulation.clearDeviceMetricsOverride", new Dictionary<string, object>());
-                        Console.WriteLine($"[AdLink] [CaptureFullPage] Đã clear device metrics override");
-                    } 
-                    catch (Exception ex) 
-                    { 
-                        Console.WriteLine($"[AdLink] [CaptureFullPage] Lỗi khi clear device metrics: {ex.Message}");
                     }
                 }
                 else
                 {
-                    Console.WriteLine($"[AdLink] [CaptureFullPage] Không phải ChromeDriver, dùng ITakesScreenshot...");
-                    try
-                    {
-                        var shot = ((ITakesScreenshot)driver).GetScreenshot();
-                        fullShotBytes = shot.AsByteArray;
-                        fullOk = fullShotBytes != null && fullShotBytes.Length > 0;
-                        Console.WriteLine($"[AdLink] [CaptureFullPage] ITakesScreenshot chụp thành công, kích thước: {fullShotBytes.Length} bytes");
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[AdLink] [CaptureFullPage] ITakesScreenshot fail: {ex.Message}");
-                        fullOk = false;
-                    }
+                    Console.WriteLine($"[AdLink] [CaptureFullPage] Không tìm thấy menu /lien-he, bỏ qua bước 3");
                 }
                 
-                if (!fullOk || fullShotBytes == null || fullShotBytes.Length == 0)
+                // ========== BƯỚC 4: Ghép các ảnh lại và convert sang base64 ==========
+                if (screenshots.Count == 0)
                 {
-                    Console.WriteLine($"[AdLink] [CaptureFullPage] ERROR: Không thể chụp screenshot full page");
+                    Console.WriteLine($"[AdLink] [CaptureFullPage] ERROR: Không có ảnh nào để ghép");
                     return "";
                 }
                 
-                // Bước 8: Nén ảnh và convert sang base64
-                Console.WriteLine($"[AdLink] [CaptureFullPage] Bước 8: Nén ảnh và convert sang base64 với quality={jpegQuality}...");
-                using (var ms = new MemoryStream(fullShotBytes))
-                using (var fullImg = Image.Load<Rgba32>(ms))
-                using (var outputMs = new MemoryStream())
+                Console.WriteLine($"[AdLink] [CaptureFullPage] Bước 4: Ghép {screenshots.Count} ảnh lại...");
+                
+                var images = new List<Image<Rgba32>>();
+                try
                 {
-                    var encoder = new JpegEncoder { Quality = (int)Math.Clamp(jpegQuality, 1, 100) };
-                    fullImg.Save(outputMs, encoder);
-                    var compressedBytes = outputMs.ToArray();
-                    string base64Result = Convert.ToBase64String(compressedBytes);
-                    Console.WriteLine($"[AdLink] [CaptureFullPage] SUCCESS: Đã chụp và nén xong, kích thước gốc: {fullShotBytes.Length} bytes, sau nén: {compressedBytes.Length} bytes, base64: {base64Result.Length} ký tự");
-                    return base64Result;
+                    // Load tất cả ảnh vào memory
+                    int maxWidth = 0;
+                    int totalHeight = 0;
+                    
+                    foreach (var screenshotBytes in screenshots)
+                    {
+                        if (screenshotBytes == null || screenshotBytes.Length == 0) continue;
+                        
+                        using (var ms = new MemoryStream(screenshotBytes))
+                        {
+                            var img = Image.Load<Rgba32>(ms);
+                            images.Add(img);
+                            maxWidth = Math.Max(maxWidth, img.Width);
+                            totalHeight += img.Height;
+                            Console.WriteLine($"[AdLink] [CaptureFullPage] Load ảnh: {img.Width}x{img.Height}");
+                        }
+                    }
+                    
+                    if (images.Count == 0)
+                    {
+                        Console.WriteLine($"[AdLink] [CaptureFullPage] ERROR: Không thể load ảnh nào");
+                        return "";
+                    }
+                    
+                    // Tạo ảnh mới với kích thước tổng hợp
+                    Console.WriteLine($"[AdLink] [CaptureFullPage] Tạo ảnh ghép: {maxWidth}x{totalHeight}");
+                    using (var mergedImage = new Image<Rgba32>(maxWidth, totalHeight))
+                    {
+                        int currentY = 0;
+                        
+                        // Vẽ từng ảnh lên ảnh ghép
+                        foreach (var img in images)
+                        {
+                            mergedImage.Mutate(ctx => ctx.DrawImage(img, new Point(0, currentY), 1f));
+                            currentY += img.Height;
+                            Console.WriteLine($"[AdLink] [CaptureFullPage] Đã vẽ ảnh tại Y={currentY - img.Height}");
+                        }
+                        
+                        // Nén và convert sang base64
+                        Console.WriteLine($"[AdLink] [CaptureFullPage] Nén ảnh và convert sang base64 với quality={jpegQuality}...");
+                        using (var outputMs = new MemoryStream())
+                        {
+                            var encoder = new JpegEncoder { Quality = (int)Math.Clamp(jpegQuality, 1, 100) };
+                            mergedImage.Save(outputMs, encoder);
+                            var compressedBytes = outputMs.ToArray();
+                            string base64Result = Convert.ToBase64String(compressedBytes);
+                            Console.WriteLine($"[AdLink] [CaptureFullPage] SUCCESS: Đã ghép {images.Count} ảnh, kích thước sau nén: {compressedBytes.Length} bytes, base64: {base64Result.Length} ký tự");
+                            return base64Result;
+                        }
+                    }
+                }
+                finally
+                {
+                    // Dispose tất cả images
+                    foreach (var img in images)
+                    {
+                        try { img?.Dispose(); } catch { }
+                    }
                 }
             }
             catch (Exception ex)
@@ -1957,6 +2276,17 @@ namespace ConsummerScreenPageBot
                 Console.WriteLine($"[AdLink] [CaptureFullPage] EXCEPTION: Lỗi khi chụp full page screenshot: {ex.Message}");
                 Console.WriteLine($"[AdLink] [CaptureFullPage] StackTrace: {ex.StackTrace}");
                 ErrorWriter.WriteLog(LogPath, "CaptureFullPageScreenshotAsBase64", ex.ToString());
+                
+                // Đảm bảo quay lại trang gốc nếu có lỗi
+                if (!string.IsNullOrWhiteSpace(originalUrl))
+                {
+                    try
+                    {
+                        TryNavigate(driver, originalUrl, TimeSpan.FromSeconds(30), out _);
+                    }
+                    catch { }
+                }
+                
                 return "";
             }
         }
