@@ -2964,10 +2964,26 @@ namespace ConsummerScreenPageBot
         {
             try
             {
-                if (imageBytes == null || imageBytes.Length == 0) return;
-                if (string.IsNullOrWhiteSpace(RabbitQueueAnalyze)) return;
+                if (imageBytes == null || imageBytes.Length == 0)
+                {
+                    Console.WriteLine("[TryPublishAnalyze] Skipped: imageBytes is null or empty");
+                    return;
+                }
+                
+                if (string.IsNullOrWhiteSpace(RabbitQueueAnalyze))
+                {
+                    Console.WriteLine("[TryPublishAnalyze] Skipped: RabbitQueueAnalyze is not configured");
+                    return;
+                }
+                
                 EnsureAnalyzePublisherReady();
-                if (analyzeChannel == null) return;
+                
+                // Fix: Kiểm tra cả null VÀ IsOpen
+                if (analyzeChannel == null || !analyzeChannel.IsOpen)
+                {
+                    Console.WriteLine($"[TryPublishAnalyze] Skipped: analyzeChannel is null or closed (null={analyzeChannel == null}, IsOpen={analyzeChannel?.IsOpen ?? false})");
+                    return;
+                }
 
                 var snapshot = lastJobParams; // tránh race
                 
@@ -3004,6 +3020,7 @@ namespace ConsummerScreenPageBot
             }
             catch (Exception ex)
             {
+                Console.WriteLine($"[TryPublishAnalyze] Exception: {ex.Message}");
                 ErrorWriter.WriteLog(LogPath, "PublishAnalyze", ex.ToString());
             }
         }
@@ -3069,10 +3086,21 @@ namespace ConsummerScreenPageBot
                                                 exclusive: false,
                                                 autoDelete: false,
                                                 arguments: null);
+                    
+                    // Thêm log thành công
+                    Console.WriteLine($"[EnsureAnalyzePublisherReady] Successfully connected to RabbitMQ and declared queue: '{RabbitQueueAnalyze}'");
                 }
                 catch (Exception ex)
                 {
+                    // Thêm Console.WriteLine để dễ debug
+                    Console.WriteLine($"[EnsureAnalyzePublisherReady] Error: {ex.Message}");
                     ErrorWriter.WriteLog(LogPath, "EnsureAnalyzePublisher", ex.ToString());
+                    
+                    // Đảm bảo channel = null khi fail
+                    analyzeChannel?.Dispose();
+                    analyzeChannel = null;
+                    analyzeConnection?.Dispose();
+                    analyzeConnection = null;
                 }
             }
         }
