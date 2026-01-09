@@ -656,27 +656,22 @@ namespace ConsummerScreenPageBot
 
        
         /// <summary>
-        /// Chụp ảnh trang web bằng cách chia thành nhiều segment (phần) và chụp từng phần
+        /// Chụp ảnh trang web bằng cách chia thành nhiều segment (phần) và chụp từng phần bằng cách scroll đến từng vị trí
         /// 
         /// Cách thức hoạt động:
-        /// 1. Lấy kích thước thực tế của trang (width x height)
-        ///    - Giới hạn chiều cao tối đa 30000px
-        /// 2. Cuộn xuống cuối trang và đợi quảng cáo load hoàn toàn
-        /// 3. Chụp ảnh toàn trang một lần bằng CDP:
-        ///    - Đặt viewport theo kích thước tài liệu
-        ///    - Chụp ảnh full page bằng Page.captureScreenshot
-        ///    - Nếu CDP fail => fallback về ITakesScreenshot
-        /// 4. Load ảnh full page vào ImageSharp để xử lý
-        /// 5. Chia ảnh thành N segment bằng nhau (slice):
-        ///    - Tính chiều cao mỗi segment: totalHeight / segmentCount
-        ///    - Với mỗi segment:
-        ///      * Cắt ảnh theo vị trí Y tương ứng (y = i * sliceHeight)
-        ///      * Lưu segment với tên file: split{i+1}_YYYYMMDD_HHmmss_ffffff_guid.jpg
-        ///      * Nén ảnh với chất lượng jpegQuality
-        ///      * Gửi ảnh lên queue analyze để AI xử lý
-        /// 6. Reset viewport về kích thước ban đầu
+        /// 1. Scroll xuống cuối trang để kích hoạt lazy-load và đợi quảng cáo load hoàn toàn
+        /// 2. Scroll lên đầu trang để reset vị trí
+        /// 3. Tính chiều cao mỗi segment: totalHeight / segmentCount
+        /// 4. Với mỗi segment i:
+        ///    - Scroll đến vị trí Y = i * sliceHeight (đặt ở giữa viewport)
+        ///    - Đợi một chút để đảm bảo content đã render
+        ///    - Chụp viewport tại vị trí đó
+        ///    - Lưu segment với tên file: split{i+1}_YYYYMMDD_HHmmss_ffffff_guid.jpg
+        ///    - Nén ảnh với chất lượng jpegQuality
+        ///    - Gửi ảnh lên queue analyze để AI xử lý
+        /// 5. Scroll lại lên đầu trang sau khi xong
         /// 
-        /// Ưu điểm: Chia nhỏ giúp AI dễ xử lý từng phần và giảm dung lượng mỗi ảnh
+        /// Ưu điểm: Mỗi segment là ảnh chụp viewport riêng biệt khi scroll, đảm bảo không bỏ sót nội dung
         /// 
         /// Tham số:
         /// - driver: WebDriver
@@ -692,118 +687,109 @@ namespace ConsummerScreenPageBot
                 if (segmentCount <= 0) segmentCount = 3;
 
                 var js = (IJavaScriptExecutor)driver;
-                // Kích hoạt lazy-load và đợi quảng cáo hiển thị trước khi chụp full
+                
+                // Bước 1: Scroll xuống cuối trang để kích hoạt lazy-load
+                Console.WriteLine("[Segment] Scroll xuống cuối trang để kích hoạt lazy-load...");
                 ScrollToBottomAndEnsureLazyContent(driver, TimeSpan.FromSeconds(8));
+                
+                // Bước 2: Đợi quảng cáo load hoàn toàn
                 WaitForAdsLoaded(driver, TimeSpan.FromSeconds(6));
-                int pageWidth = 1920;
+                
+                // Bước 3: Lấy chiều cao tổng của trang
                 int totalHeight = 3000;
+                int viewportHeight = 1080;
                 try
                 {
-                    pageWidth = Convert.ToInt32(js.ExecuteScript("return Math.max(document.documentElement.scrollWidth, document.body.scrollWidth, window.innerWidth || 0);"));
                     totalHeight = Convert.ToInt32(js.ExecuteScript("return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight, window.innerHeight || 0);"));
+                    viewportHeight = Convert.ToInt32(js.ExecuteScript("return window.innerHeight || document.documentElement.clientHeight || 1080;"));
                 }
                 catch { }
                 if (totalHeight <= 0) totalHeight = 3000;
                 totalHeight = Math.Min(totalHeight, 30000);
+                if (viewportHeight <= 0) viewportHeight = 1080;
 
                 var shotsDir = Path.Combine(startupPath, "screenshots", hostLabel);
                 if (!Directory.Exists(shotsDir)) Directory.CreateDirectory(shotsDir);
 
-                // 1) Chụp full page một lần bằng CDP; fallback sang ITakesScreenshot nếu cần
-                byte[] fullShotBytes = Array.Empty<byte>();
-                var chrome = driver as ChromeDriver;
-                bool fullOk = false;
-                if (chrome != null)
+                // Bước 4: Tính chiều cao mỗi segment và scroll đến từng vị trí để chụp
+                int sliceHeight = (int)Math.Ceiling((double)totalHeight / segmentCount);
+                Console.WriteLine($"[Segment] Total height: {totalHeight}px, Viewport height: {viewportHeight}px, Segment height: {sliceHeight}px");
+
+                // Scroll lên đầu trang trước khi bắt đầu
+                try { js.ExecuteScript("window.scrollTo(0, 0);"); } catch { }
+                Thread.Sleep(500);
+
+                for (int i = 0; i < segmentCount; i++)
                 {
-                    var metrics = new Dictionary<string, object>
-                    {
-                        { "mobile", false },
-                        { "width", Math.Max(1, pageWidth) },
-                        { "height", Math.Max(1, totalHeight) },
-                        { "deviceScaleFactor", 1 },
-                        { "scale", 1 }
-                    };
-                    try { chrome.ExecuteCdpCommand("Emulation.setDeviceMetricsOverride", metrics); } catch { }
-
-                    try { chrome.ExecuteCdpCommand("Page.enable", new Dictionary<string, object>()); } catch { }
-
+                    // Tính vị trí Y để scroll đến (đặt vị trí segment ở giữa viewport)
+                    int targetY = i * sliceHeight;
+                    // Điều chỉnh để segment nằm ở giữa viewport
+                    int scrollY = Math.Max(0, targetY - (viewportHeight / 2));
+                    
+                    Console.WriteLine($"[Segment] Segment {i + 1}/{segmentCount}: Scroll to Y={scrollY} (target segment at Y={targetY})");
+                    
+                    // Scroll đến vị trí
                     try
                     {
-                        var args = new Dictionary<string, object>
-                        {
-                            { "format", "jpeg" },
-                            { "quality", 100 },
-                            { "captureBeyondViewport", true }
-                        };
-                        var result = chrome.ExecuteCdpCommand("Page.captureScreenshot", args) as IDictionary<string, object>;
-                        if (result != null && result.TryGetValue("data", out var dataObj) && dataObj is string base64)
-                        {
-                            fullShotBytes = Convert.FromBase64String(base64);
-                            fullOk = fullShotBytes != null && fullShotBytes.Length > 0;
-                        }
+                        js.ExecuteScript($"window.scrollTo(0, {scrollY});");
                     }
-                    catch { fullOk = false; }
-
-                    if (!fullOk)
+                    catch (Exception ex)
                     {
-                        try
-                        {
-                            var shot = ((ITakesScreenshot)driver).GetScreenshot();
-                            fullShotBytes = shot.AsByteArray;
-                            fullOk = fullShotBytes != null && fullShotBytes.Length > 0;
-                        }
-                        catch { fullOk = false; }
+                        Console.WriteLine($"[Segment] Error scrolling to {scrollY}: {ex.Message}");
                     }
-
-                    try { chrome.ExecuteCdpCommand("Emulation.clearDeviceMetricsOverride", new Dictionary<string, object>()); } catch { }
-                }
-                else
-                {
-                    // No CDP: best effort viewport screenshot
+                    
+                    // Đợi để đảm bảo content đã render
+                    Thread.Sleep(800);
+                    
+                    // Chụp viewport tại vị trí này
+                    byte[] segmentBytes = Array.Empty<byte>();
                     try
                     {
                         var shot = ((ITakesScreenshot)driver).GetScreenshot();
-                        fullShotBytes = shot.AsByteArray;
-                        fullOk = fullShotBytes != null && fullShotBytes.Length > 0;
+                        segmentBytes = shot.AsByteArray;
                     }
-                    catch { fullOk = false; }
-                }
-                if (!fullOk || fullShotBytes == null || fullShotBytes.Length == 0)
-                {
-                    throw new Exception("Failed to capture full page screenshot for slicing.");
-                }
-
-                // 2) Cắt ảnh theo N phần từ fullShotBytes, luôn đảm bảo phần cuối chứa phần còn lại (footer)
-                using (var ms = new MemoryStream(fullShotBytes))
-                using (var fullImg = Image.Load<Rgba32>(ms))
-                {
-                    int sliceHeight = (int)Math.Ceiling(fullImg.Height / (double)segmentCount);
-                    for (int i = 0; i < segmentCount; i++)
+                    catch (Exception ex)
                     {
-                        int y = i * sliceHeight;
-                        int currentHeight = Math.Min(sliceHeight, Math.Max(1, fullImg.Height - y));
-                        if (currentHeight <= 0) break;
-
-                        using (var seg = fullImg.Clone(ctx => ctx.Crop(new SixLabors.ImageSharp.Rectangle(0, y, fullImg.Width, currentHeight))))
+                        Console.WriteLine($"[Segment] Error capturing segment {i + 1}: {ex.Message}");
+                        continue;
+                    }
+                    
+                    if (segmentBytes == null || segmentBytes.Length == 0)
+                    {
+                        Console.WriteLine($"[Segment] WARNING: Segment {i + 1} screenshot is empty");
+                        continue;
+                    }
+                    
+                    // Load ảnh và lưu
+                    try
+                    {
+                        using (var ms = new MemoryStream(segmentBytes))
+                        using (var img = Image.Load<Rgba32>(ms))
                         {
                             var fileName = $"split{i+1}_{DateTime.Now:yyyyMMdd_HHmmss_fff}_{Guid.NewGuid().ToString("N").Substring(0,6)}.jpg";
                             var savePath = Path.Combine(shotsDir, fileName);
-                            // Nén như cũ (scale 50%)
-                            AdCapture.SaveImageCompressed(seg, savePath, 1.0, jpegQuality);
-
-                            try
-                            {
-                                var compressedBytes = File.ReadAllBytes(savePath);
-                                try { Console.WriteLine($"[Segment] Saved {Path.GetFileName(savePath)} ({compressedBytes.Length} bytes)"); } catch { }
-                                // Truyền width và height của segment
-                                try { Console.WriteLine($"[Segment] Debug - seg.Width: {seg.Width}, seg.Height: {seg.Height}"); } catch { }
-                                TryPublishAnalyze(compressedBytes, seg.Width, seg.Height);
-                            }
-                            catch { }
+                            
+                            // Nén ảnh
+                            AdCapture.SaveImageCompressed(img, savePath, 1.0, jpegQuality);
+                            
+                            var compressedBytes = File.ReadAllBytes(savePath);
+                            Console.WriteLine($"[Segment] Saved segment {i + 1}/{segmentCount}: {Path.GetFileName(savePath)} ({compressedBytes.Length} bytes, {img.Width}x{img.Height}px)");
+                            
+                            // Gửi lên queue
+                            TryPublishAnalyze(compressedBytes, img.Width, img.Height);
                         }
                     }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[Segment] Error processing segment {i + 1}: {ex.Message}");
+                        ErrorWriter.WriteLog(LogPath, "SegmentScreenshots.Process", $"Segment {i + 1} - {hostLabel} => {ex}");
+                    }
                 }
-                try { Console.WriteLine($"[Segment] Done host={hostLabel}"); } catch { }
+                
+                // Scroll lại lên đầu trang sau khi xong
+                try { js.ExecuteScript("window.scrollTo(0, 0);"); } catch { }
+                
+                Console.WriteLine($"[Segment] Done host={hostLabel}, captured {segmentCount} segments");
             }
             catch (Exception ex)
             {
@@ -964,24 +950,38 @@ namespace ConsummerScreenPageBot
         /// <summary>
         /// Normalize URL: loại bỏ fragment, normalize path
         /// </summary>
+        /// <summary>
+        /// Normalize URL để so sánh và tránh lặp:
+        /// - Loại bỏ query params (utm_source, tracking params, ...)
+        /// - Loại bỏ fragment (#...)
+        /// - Normalize trailing slash
+        /// - Lowercase host
+        /// </summary>
         private static string NormalizeUrl(string url)
         {
             if (string.IsNullOrWhiteSpace(url))
             {
-                return url;
+                return url ?? "";
             }
             
             try
             {
                 var uri = new Uri(url);
-                // Loại bỏ fragment (#...)
-                var normalized = $"{uri.Scheme}://{uri.Host}{uri.AbsolutePath}{uri.Query}";
+                // Loại bỏ query params và fragment, chỉ giữ scheme://host/path
+                string path = uri.AbsolutePath;
+                // Normalize trailing slash: loại bỏ trailing slash (trừ root path)
+                if (path.EndsWith("/") && path.Length > 1)
+                {
+                    path = path.TrimEnd('/');
+                }
+                
+                string normalized = $"{uri.Scheme.ToLowerInvariant()}://{uri.Host.ToLowerInvariant()}{path}";
                 return normalized;
             }
             catch
             {
-                // Nếu không parse được URL, trả về nguyên bản
-                return url.Trim();
+                // Nếu không parse được URL, trả về nguyên bản đã trim và lowercase
+                return url.Trim().ToLowerInvariant();
             }
         }
         
@@ -1067,6 +1067,7 @@ namespace ConsummerScreenPageBot
                 int processedCount = 0;
                 int handledBannerOrdinal = 0;
                 var processedFingerprints = new HashSet<string>(StringComparer.Ordinal);
+                var processedUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase); // Track URL đã xử lý để tránh lặp
                 
                 while (true)
                 {
@@ -1442,8 +1443,23 @@ namespace ConsummerScreenPageBot
                             
                             if (isExternal && hasImages)
                             {
+                                // Kiểm tra URL đã được xử lý chưa (tránh lặp)
+                                string normalizedUrl = NormalizeUrl(clickedUrl);
+                                if (processedUrls.Contains(normalizedUrl))
+                                {
+                                    Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> ⚠ URL đã được xử lý trước đó, bỏ qua để tránh lặp: {normalizedUrl}");
+                                    Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> URL gốc: {clickedUrl}");
+                                    driver.Close();
+                                    driver.SwitchTo().Window(originalWindowHandle);
+                                    CloseAllNonOriginalTabs(driver, ref originalWindowHandle);
+                                    continue;
+                                }
+                                
                                 Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> ✓ Trang đạt tiêu chí (external={isExternal}, hasImages={hasImages}), bắt đầu xử lý chụp screenshot...");
-                                Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> URL: {clickedUrl}");
+                                Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> URL: {clickedUrl} (normalized: {normalizedUrl})");
+                                
+                                // Đánh dấu URL đã xử lý (trước khi chụp để tránh chụp lại nếu có lỗi)
+                                processedUrls.Add(normalizedUrl);
                                 
                                 // Lấy jpegQuality từ job params, mặc định 70
                                 long jpegQuality = 70;
@@ -1470,20 +1486,32 @@ namespace ConsummerScreenPageBot
                                 System.Threading.Thread.Sleep(200);
                                 Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> Đã đóng popup xong");
                                 
+                                // Kiểm tra xem có phải là error page không trước khi chụp
+                                if (IsErrorPage(driver))
+                                {
+                                    Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> ⚠ Phát hiện error page tại URL: {clickedUrl}, bỏ qua không chụp screenshot");
+                                    driver.Close();
+                                    driver.SwitchTo().Window(originalWindowHandle);
+                                    CloseAllNonOriginalTabs(driver, ref originalWindowHandle);
+                                    continue;
+                                }
+                                
                                 // Chụp toàn bộ màn hình và chuyển sang base64 cho TẤT CẢ các link
                                 string screenshotBase64 = "";
+                                string contactInfoJson = "{}";
                                 try
                                 {
                                     Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> ========== BẮT ĐẦU CHỤP FULL PAGE SCREENSHOT ==========");
                                     Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> URL: {clickedUrl}");
                                     Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> JPEG Quality: {jpegQuality}");
                                     
-                                    screenshotBase64 = CaptureFullPageScreenshotAsBase64(driver, jpegQuality);
+                                    screenshotBase64 = CaptureFullPageScreenshotAsBase64(driver, out contactInfoJson, jpegQuality);
                                     
                                     if (!string.IsNullOrWhiteSpace(screenshotBase64))
                                     {
                                         Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> ✓✓✓ CHỤP SCREENSHOT THÀNH CÔNG ✓✓✓");
                                         Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> Kích thước base64: {screenshotBase64.Length} ký tự");
+                                        Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> Contact info extracted: {contactInfoJson?.Length ?? 0} chars");
                                         Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> ========== HOÀN THÀNH CHỤP SCREENSHOT ==========");
                                     }
                                     else
@@ -1501,9 +1529,17 @@ namespace ConsummerScreenPageBot
                                 }
                                 
                                 Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> Bước cuối: Push vào queue với screenshotBase64 length: {(screenshotBase64?.Length ?? 0)}");
-                                PushIframeToQueue(clickedUrl, screenshotBase64, jobParamsSnapshot);
+                                if (!string.IsNullOrWhiteSpace(screenshotBase64))
+                                {
+                                    Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> ⚡⚡⚡ GỌI PushIframeToQueue - clickedUrl: '{clickedUrl}', screenshotLen: {(screenshotBase64?.Length ?? 0)} ⚡⚡⚡");
+                                    PushIframeToQueue(clickedUrl, screenshotBase64, jobParamsSnapshot, contactInfoJson ?? "{}");
                                 processedCount++;
                                 Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> ✓ Đã push vào queue, processedCount: {processedCount}");
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> ⚠ Screenshot rỗng, bỏ qua không push vào queue");
+                                }
                             }
                             else
                             {
@@ -1528,8 +1564,23 @@ namespace ConsummerScreenPageBot
                                 }
                                 else if (IsExternalLink(currentUrl) && CheckPageHasImages(driver))
                                 {
+                                    // Kiểm tra URL đã được xử lý chưa (tránh lặp)
+                                    string normalizedUrl = NormalizeUrl(currentUrl);
+                                    if (processedUrls.Contains(normalizedUrl))
+                                    {
+                                        Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> ⚠ URL đã được xử lý trước đó, bỏ qua để tránh lặp: {normalizedUrl}");
+                                        Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> URL gốc: {currentUrl}");
+                                        driver.Navigate().GoToUrl(originalUrl);
+                                        System.Threading.Thread.Sleep(500);
+                                        CloseAllNonOriginalTabs(driver, ref originalWindowHandle);
+                                        continue;
+                                    }
+                                    
                                     Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> ✓ Trang đạt tiêu chí (navigate trong cùng tab), bắt đầu xử lý chụp screenshot...");
-                                    Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> URL: {currentUrl}");
+                                    Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> URL: {currentUrl} (normalized: {normalizedUrl})");
+                                    
+                                    // Đánh dấu URL đã xử lý (trước khi chụp để tránh chụp lại nếu có lỗi)
+                                    processedUrls.Add(normalizedUrl);
                                     
                                     // Lấy jpegQuality từ job params, mặc định 70
                                     long jpegQuality = 70;
@@ -1556,20 +1607,32 @@ namespace ConsummerScreenPageBot
                                     System.Threading.Thread.Sleep(200);
                                     Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> Đã đóng popup xong");
                                     
+                                    // Kiểm tra xem có phải là error page không trước khi chụp
+                                    if (IsErrorPage(driver))
+                                    {
+                                        Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> ⚠ Phát hiện error page tại URL: {currentUrl}, bỏ qua không chụp screenshot");
+                                        driver.Navigate().GoToUrl(originalUrl);
+                                        System.Threading.Thread.Sleep(500);
+                                        CloseAllNonOriginalTabs(driver, ref originalWindowHandle);
+                                        continue;
+                                    }
+                                    
                                     // Chụp toàn bộ màn hình và chuyển sang base64 cho TẤT CẢ các link
                                     string screenshotBase64 = "";
+                                    string contactInfoJson = "{}";
                                     try
                                     {
                                         Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> ========== BẮT ĐẦU CHỤP FULL PAGE SCREENSHOT (navigate) ==========");
                                         Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> URL: {currentUrl}");
                                         Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> JPEG Quality: {jpegQuality}");
                                         
-                                        screenshotBase64 = CaptureFullPageScreenshotAsBase64(driver, jpegQuality);
+                                        screenshotBase64 = CaptureFullPageScreenshotAsBase64(driver, out contactInfoJson, jpegQuality);
                                         
                                         if (!string.IsNullOrWhiteSpace(screenshotBase64))
                                         {
                                             Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> ✓✓✓ CHỤP SCREENSHOT THÀNH CÔNG ✓✓✓");
                                             Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> Kích thước base64: {screenshotBase64.Length} ký tự");
+                                            Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> Contact info extracted: {contactInfoJson?.Length ?? 0} chars");
                                             Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> ========== HOÀN THÀNH CHỤP SCREENSHOT ==========");
                                         }
                                         else
@@ -1587,9 +1650,17 @@ namespace ConsummerScreenPageBot
                                     }
                                     
                                     Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> Bước cuối: Push vào queue với screenshotBase64 length: {(screenshotBase64?.Length ?? 0)}");
-                                    PushIframeToQueue(currentUrl, screenshotBase64, jobParamsSnapshot);
+                                    if (!string.IsNullOrWhiteSpace(screenshotBase64))
+                                    {
+                                        Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> ⚡⚡⚡ GỌI PushIframeToQueue - currentUrl: '{currentUrl}', screenshotLen: {(screenshotBase64?.Length ?? 0)} ⚡⚡⚡");
+                                        PushIframeToQueue(currentUrl, screenshotBase64, jobParamsSnapshot, contactInfoJson ?? "{}");
                                     processedCount++;
                                     Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> ✓ Đã push vào queue, processedCount: {processedCount}");
+                                    }
+                                    else
+                                    {
+                                        Console.WriteLine($"[AdLink] Banner {handledBannerOrdinal} -> ⚠ Screenshot rỗng, bỏ qua không push vào queue");
+                                    }
                                 }
                                 
                                 driver.Navigate().GoToUrl(originalUrl);
@@ -1818,7 +1889,10 @@ namespace ConsummerScreenPageBot
                     (function() {
                         const emailRegex = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
                         const phoneRegex = /(\+?\d{1,3}[\s\-\.]?)?(\(?\d{2,4}\)?[\s\-\.]?){2,4}\d{2,4}/;
-                        const selectors = 'a, span, div, p, li, strong, b, h1, h2, h3, h4, h5, h6';
+                        const mstRegex = /(MST|Mã số thuế|mã số thuế)[\s:]*\d{10,13}/i;
+                        const addressKeywords = ['địa chỉ', 'address', 'location', 'văn phòng', 'trụ sở', 'office'].map(k => k.toLowerCase());
+                        const companyKeywords = ['công ty', 'company', 'cty', 'cty.', 'doanh nghiệp', 'enterprise'].map(k => k.toLowerCase());
+                        const selectors = 'a, span, div, p, li, strong, b, h1, h2, h3, h4, h5, h6, footer, section, address';
                         const nodes = Array.from(document.querySelectorAll(selectors));
                         const scrollY = window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0;
 
@@ -1827,7 +1901,42 @@ namespace ConsummerScreenPageBot
                             const text = node.innerText.trim();
                             if (!text) continue;
                             if (text.length > 200) continue;
-                            if (emailRegex.test(text) || phoneRegex.test(text)) {
+                            
+                            const textLower = text.toLowerCase();
+                            let hasContactInfo = false;
+                            
+                            // Kiểm tra email
+                            if (emailRegex.test(text)) {
+                                hasContactInfo = true;
+                            }
+                            // Kiểm tra phone
+                            else if (phoneRegex.test(text)) {
+                                hasContactInfo = true;
+                            }
+                            // Kiểm tra MST (Mã số thuế)
+                            else if (mstRegex.test(text)) {
+                                hasContactInfo = true;
+                            }
+                            // Kiểm tra địa chỉ (address keywords)
+                            else {
+                                for (let i = 0; i < addressKeywords.length; i++) {
+                                    if (textLower.includes(addressKeywords[i])) {
+                                        hasContactInfo = true;
+                                        break;
+                                    }
+                                }
+                                // Kiểm tra công ty (company keywords)
+                                if (!hasContactInfo) {
+                                    for (let i = 0; i < companyKeywords.length; i++) {
+                                        if (textLower.includes(companyKeywords[i])) {
+                                            hasContactInfo = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            if (hasContactInfo) {
                                 const rect = node.getBoundingClientRect();
                                 return {
                                     found: true,
@@ -1853,13 +1962,13 @@ namespace ConsummerScreenPageBot
                     js.ExecuteScript("window.scrollTo(0, arguments[0]);", finalY);
                     if (result.TryGetValue("text", out var textObj))
                     {
-                        Console.WriteLine($"[AdLink] [TryScrollToContactInfo] Đã tìm thấy contact info: {textObj}");
+                        Console.WriteLine($"[AdLink] [TryScrollToContactInfo] Đã tìm thấy contact info (email/phone/address/company/MST): {textObj}");
                     }
                     System.Threading.Thread.Sleep(300);
                     return true;
                 }
 
-                Console.WriteLine("[AdLink] [TryScrollToContactInfo] Không tìm thấy email/số điện thoại, giữ nguyên logic cũ");
+                Console.WriteLine("[AdLink] [TryScrollToContactInfo] Không tìm thấy email/số điện thoại/địa chỉ/công ty/MST, giữ nguyên logic cũ");
             }
             catch (Exception ex)
             {
@@ -2029,6 +2138,473 @@ namespace ConsummerScreenPageBot
         }
 
         /// <summary>
+        /// Kiểm tra xem trang hiện tại có phải là trang lỗi "This site can't be reached" hoặc các lỗi kết nối khác không
+        /// </summary>
+        private static bool IsErrorPage(IWebDriver driver)
+        {
+            try
+            {
+                var currentUrl = driver.Url;
+                
+                // Kiểm tra URL có phải là error page của browser không
+                if (currentUrl.StartsWith("chrome-error://", StringComparison.OrdinalIgnoreCase) ||
+                    currentUrl.StartsWith("edge-error://", StringComparison.OrdinalIgnoreCase) ||
+                    currentUrl.StartsWith("about:error", StringComparison.OrdinalIgnoreCase))
+            {
+                    Console.WriteLine($"[AdLink] [IsErrorPage] Phát hiện error page từ URL: {currentUrl}");
+                    return true;
+                }
+                
+                // Kiểm tra title và body text
+                var js = (IJavaScriptExecutor)driver;
+                var result = js.ExecuteScript(@"
+                    (function() {
+                        var title = document.title || '';
+                        var bodyText = document.body ? (document.body.innerText || document.body.textContent || '') : '';
+                        var combined = (title + ' ' + bodyText).toLowerCase();
+                
+                        // Các từ khóa lỗi phổ biến
+                        var errorKeywords = [
+                            'this site can\'t be reached',
+                            'this site cannot be reached',
+                            'err_name_not_resolved',
+                            'err_connection_refused',
+                            'err_internet_disconnected',
+                            'err_connection_timed_out',
+                            'err_connection_reset',
+                            'err_network_changed',
+                            'err_timed_out',
+                            'unable to connect',
+                            'can\'t reach this page',
+                            'cannot reach this page',
+                            'site unreachable',
+                            'dns_probe_finished_nxdomain',
+                            'net::err_name_not_resolved',
+                            'net::err_connection_refused'
+                        ];
+                        
+                        for (var i = 0; i < errorKeywords.length; i++) {
+                            if (combined.includes(errorKeywords[i])) {
+                                return true;
+                            }
+                        }
+                        
+                        return false;
+                    })();
+                ") as bool?;
+                
+                if (result == true)
+                {
+                    Console.WriteLine($"[AdLink] [IsErrorPage] Phát hiện error page từ nội dung trang");
+                    return true;
+                }
+                
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AdLink] [IsErrorPage] Lỗi khi kiểm tra error page: {ex.Message}");
+                // Nếu có lỗi khi kiểm tra, giả định không phải error page để tiếp tục xử lý
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Loại bỏ các overlay, mask, hoặc elements có z-index cao che mất thông tin contact (TỐI ƯU)
+        /// </summary>
+        private static void RemoveOverlaysAndMasks(IWebDriver driver)
+        {
+            try
+            {
+                var js = (IJavaScriptExecutor)driver;
+                var script = @"
+                    (function() {
+                        let removed = 0;
+                        const winWidth = window.innerWidth;
+                        const winHeight = window.innerHeight;
+                        const minOverlayWidth = winWidth * 0.5;
+                        const minOverlayHeight = winHeight * 0.5;
+                        
+                        // 1. Tìm và ẩn/xóa các overlay phổ biến (tối ưu: chỉ query các selector cụ thể)
+                        const overlaySelectors = [
+                            '.overlay', '.backdrop', '.modal-backdrop', '.modal-mask',
+                            '.ant-modal-mask', '.ReactModal__Overlay', '.popup-overlay'
+                        ];
+                        
+                        for (let i = 0; i < overlaySelectors.length; i++) {
+                            try {
+                                const elements = document.querySelectorAll(overlaySelectors[i]);
+                                for (let j = 0; j < elements.length && j < 10; j++) { // Giới hạn tối đa 10 elements mỗi selector
+                                    const el = elements[j];
+                                    const rect = el.getBoundingClientRect();
+                                    // Early return: bỏ qua nếu kích thước quá nhỏ
+                                    if (rect.width < minOverlayWidth && rect.height < minOverlayHeight) continue;
+                                    
+                                    const style = window.getComputedStyle(el);
+                                    const zIndex = parseInt(style.zIndex) || 0;
+                                    // Chỉ xóa nếu là overlay thực sự (có z-index cao và che màn hình)
+                                    if (zIndex > 1000) {
+                                        el.style.display = 'none';
+                                        removed++;
+                                    }
+                                }
+                            } catch(e) {}
+                        }
+                        
+                        // 2. Tìm elements có z-index cao (tối ưu: chỉ query elements có position fixed/absolute)
+                        // Chỉ xử lý elements có position fixed hoặc absolute để giảm số lượng
+                        const positionedElements = document.querySelectorAll('[style*=""position:fixed""], [style*=""position:absolute""]');
+                        const maxElements = Math.min(positionedElements.length, 50); // Giới hạn tối đa 50 elements
+                        
+                        for (let i = 0; i < maxElements; i++) {
+                            try {
+                                const el = positionedElements[i];
+                                const rect = el.getBoundingClientRect();
+                                // Early return: bỏ qua nếu không ở phần dưới màn hình
+                                if (rect.top >= winHeight * 0.7) continue;
+                                if (rect.width < winWidth * 0.3 && rect.height < winHeight * 0.3) continue;
+                                
+                                const style = window.getComputedStyle(el);
+                                const zIndex = parseInt(style.zIndex) || 0;
+                
+                                // Nếu element có z-index > 1000 và che mất phần dưới trang
+                                if (zIndex > 1000 && style.position !== 'static') {
+                                    // Kiểm tra xem có phải là popup/modal không (tối ưu: kiểm tra class trước)
+                                    const className = el.className || '';
+                                    const role = el.getAttribute('role') || '';
+                                    const isPopup = className.includes('modal') || 
+                                                  className.includes('popup') ||
+                                                  role === 'dialog' ||
+                                                  role === 'alertdialog';
+                                    
+                                    if (!isPopup) {
+                                        el.style.display = 'none';
+                                        removed++;
+                                    }
+                                }
+                            } catch(e) {}
+                        }
+                        
+                        // 3. Loại bỏ fixed/sticky elements che mất footer (tối ưu: chỉ query fixed elements)
+                        const fixedElements = document.querySelectorAll('[style*=""position:fixed""]');
+                        const maxFixed = Math.min(fixedElements.length, 20); // Giới hạn tối đa 20 elements
+                        
+                        for (let i = 0; i < maxFixed; i++) {
+                            try {
+                                const el = fixedElements[i];
+                                const rect = el.getBoundingClientRect();
+                                // Early return: bỏ qua nếu không ở cuối trang
+                                if (rect.top + rect.height <= winHeight * 0.8) continue;
+                                if (rect.height <= 50) continue;
+                                
+                                el.style.opacity = '0.3'; // Làm mờ thay vì ẩn hoàn toàn
+                                removed++;
+                            } catch(e) {}
+                        }
+                        
+                        return removed;
+                    })();
+                ";
+                
+                var removed = js.ExecuteScript(script);
+                if (removed != null && Convert.ToInt32(removed) > 0)
+                {
+                    Console.WriteLine($"[AdLink] [RemoveOverlays] Đã loại bỏ {removed} overlay/mask che mất thông tin");
+                    System.Threading.Thread.Sleep(100); // Giảm từ 500ms xuống 100ms
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AdLink] [RemoveOverlays] Lỗi: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Tìm và hiển thị các elements bị ẩn nhưng chứa thông tin contact (TỐI ƯU)
+        /// </summary>
+        private static void RevealHiddenContactInfo(IWebDriver driver)
+        {
+                try
+                {
+                var js = (IJavaScriptExecutor)driver;
+                var script = @"
+                    (function() {
+                        const emailRegex = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+                        const phoneRegex = /(\+?\d{1,3}[\s\-\.]?)?(\(?\d{2,4}\)?[\s\-\.]?){2,4}\d{2,4}/;
+                        const mstRegex = /(MST|Mã số thuế|mã số thuế)[\s:]*\d{10,13}/i;
+                        const addressKeywords = ['địa chỉ', 'address', 'location', 'văn phòng', 'trụ sở'].map(k => k.toLowerCase());
+                        const companyKeywords = ['công ty', 'company', 'cty', 'cty.', 'doanh nghiệp', 'enterprise'].map(k => k.toLowerCase());
+                        
+                        let revealed = 0;
+                        // Tối ưu: Chỉ query các elements có khả năng chứa contact info (div, span, p, a, footer, section)
+                        const candidateSelectors = 'div, span, p, a, footer, section, address, li';
+                        const allElements = document.querySelectorAll(candidateSelectors);
+                        const maxElements = Math.min(allElements.length, 200); // Giới hạn tối đa 200 elements
+                        
+                        for (let i = 0; i < maxElements; i++) {
+                            try {
+                                const el = allElements[i];
+                                // Early return: bỏ qua nếu element quá lớn (không phải contact info)
+                                const text = el.innerText || el.textContent || '';
+                                if (!text || text.length > 500 || text.length < 5) continue;
+                                
+                                // Tối ưu: kiểm tra text trước khi gọi getComputedStyle (tốn kém hơn)
+                                const textLower = text.toLowerCase();
+                                let hasContactInfo = false;
+                                
+                                // Kiểm tra email
+                                if (emailRegex.test(text)) {
+                                    hasContactInfo = true;
+                                }
+                                // Kiểm tra phone (chỉ nếu chưa tìm thấy email)
+                                else if (phoneRegex.test(text)) {
+                                    hasContactInfo = true;
+                                }
+                                // Kiểm tra MST (Mã số thuế)
+                                else if (mstRegex.test(text)) {
+                                    hasContactInfo = true;
+                                }
+                                // Kiểm tra keywords (chỉ nếu chưa tìm thấy)
+                                else {
+                                    for (let k = 0; k < addressKeywords.length; k++) {
+                                        if (textLower.includes(addressKeywords[k])) {
+                                            hasContactInfo = true;
+                                            break;
+                                        }
+                                    }
+                                    // Kiểm tra công ty (chỉ nếu chưa tìm thấy)
+                                    if (!hasContactInfo) {
+                                        for (let k = 0; k < companyKeywords.length; k++) {
+                                            if (textLower.includes(companyKeywords[k])) {
+                                                hasContactInfo = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                if (!hasContactInfo) continue;
+                                
+                                // Chỉ gọi getComputedStyle khi đã xác nhận có contact info
+                                const style = window.getComputedStyle(el);
+                                const rect = el.getBoundingClientRect();
+                                
+                                // Kiểm tra nếu element bị ẩn
+                                const isHidden = style.display === 'none' || 
+                                               style.visibility === 'hidden' ||
+                                               parseFloat(style.opacity) === 0 ||
+                                               rect.width === 0 || 
+                                               rect.height === 0;
+                                
+                                if (isHidden) {
+                                    // Hiển thị element
+                                    el.style.display = 'block';
+                                    el.style.visibility = 'visible';
+                                    el.style.opacity = '1';
+                                    el.style.height = 'auto';
+                                    el.style.width = 'auto';
+                                    
+                                    // Đảm bảo parent elements cũng hiển thị (giới hạn depth)
+                                    let parent = el.parentElement;
+                                    let depth = 0;
+                                    while (parent && depth < 2) { // Giảm từ 3 xuống 2
+                                        const parentStyle = window.getComputedStyle(parent);
+                                        if (parentStyle.display === 'none') {
+                                            parent.style.display = 'block';
+                                        }
+                                        if (parentStyle.visibility === 'hidden') {
+                                            parent.style.visibility = 'visible';
+                                        }
+                                        parent = parent.parentElement;
+                                        depth++;
+                                    }
+                                    
+                                    revealed++;
+                                    // Giới hạn số lượng elements được reveal để tránh quá chậm
+                                    if (revealed >= 10) break;
+                    }
+                            } catch(e) {}
+                        }
+                        
+                        return revealed;
+                    })();
+                ";
+                
+                var revealed = js.ExecuteScript(script);
+                if (revealed != null && Convert.ToInt32(revealed) > 0)
+                    {
+                    Console.WriteLine($"[AdLink] [RevealHiddenContact] Đã hiển thị {revealed} elements chứa contact info");
+                    System.Threading.Thread.Sleep(100); // Giảm từ 500ms xuống 100ms
+                    }
+                }
+                catch (Exception ex)
+                {
+                Console.WriteLine($"[AdLink] [RevealHiddenContact] Lỗi: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Trích xuất text contact info từ DOM (kể cả khi bị ẩn) và thêm vào payload
+        /// </summary>
+        private static string ExtractContactInfoFromDOM(IWebDriver driver)
+        {
+            try
+            {
+                var js = (IJavaScriptExecutor)driver;
+                var script = @"
+                    (function() {
+                        const emailRegex = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+                        const phoneRegex = /(\+?\d{1,3}[\s\-\.]?)?(\(?\d{2,4}\)?[\s\-\.]?){2,4}\d{2,4}/;
+                        const mstRegex = /(MST|Mã số thuế|mã số thuế)[\s:]*(\d{10,13})/i;
+                        const addressKeywords = ['địa chỉ', 'address', 'location', 'văn phòng', 'trụ sở', 'office'].map(k => k.toLowerCase());
+                        const companyKeywords = ['công ty', 'company', 'cty', 'cty.', 'doanh nghiệp', 'enterprise'].map(k => k.toLowerCase());
+                        
+                        const results = {
+                            emails: [],
+                            phones: [],
+                            addresses: [],
+                            companies: [],
+                            msts: []
+                        };
+                        
+                        const allElements = document.querySelectorAll('*');
+                        allElements.forEach(el => {
+                            try {
+                                // Lấy text từ innerText, textContent, và cả value attribute
+                                const texts = [
+                                    el.innerText || '',
+                                    el.textContent || '',
+                                    el.getAttribute('value') || '',
+                                    el.getAttribute('data-value') || '',
+                                    el.getAttribute('placeholder') || ''
+                                ].filter(t => t && t.length > 0 && t.length < 500);
+                                
+                                texts.forEach(text => {
+                                    // Tìm email
+                                    const emailMatches = text.match(emailRegex);
+                                    if (emailMatches) {
+                                        emailMatches.forEach(email => {
+                                            if (!results.emails.includes(email)) {
+                                                results.emails.push(email);
+                                            }
+                                        });
+                                    }
+                                    
+                                    // Tìm số điện thoại
+                                    const phoneMatches = text.match(phoneRegex);
+                                    if (phoneMatches) {
+                                        phoneMatches.forEach(phone => {
+                                            const cleanPhone = phone.trim();
+                                            if (cleanPhone.length >= 8 && !results.phones.includes(cleanPhone)) {
+                                                results.phones.push(cleanPhone);
+                                            }
+                                        });
+                                    }
+                                    
+                                    // Tìm địa chỉ (dòng chứa keyword + context)
+                                    addressKeywords.forEach(keyword => {
+                                        if (text.toLowerCase().includes(keyword)) {
+                                            // Lấy 100 ký tự xung quanh keyword
+                                            const index = text.toLowerCase().indexOf(keyword);
+                                            const start = Math.max(0, index - 50);
+                                            const end = Math.min(text.length, index + keyword.length + 50);
+                                            const addressSnippet = text.substring(start, end).trim();
+                                            
+                                            if (addressSnippet.length > 10 && !results.addresses.includes(addressSnippet)) {
+                                                results.addresses.push(addressSnippet);
+                                            }
+                                        }
+                                    });
+                                    
+                                    // Tìm MST (Mã số thuế)
+                                    const mstMatches = text.match(mstRegex);
+                                    if (mstMatches && mstMatches.length >= 3) {
+                                        const mstValue = mstMatches[2];
+                                        if (mstValue && !results.msts.includes(mstValue)) {
+                                            results.msts.push(mstValue);
+                                        }
+                                    }
+                                    
+                                    // Tìm thông tin công ty (dòng chứa keyword + context)
+                                    const textLower = text.toLowerCase();
+                                    companyKeywords.forEach(keyword => {
+                                        if (textLower.includes(keyword)) {
+                                            // Lấy 100 ký tự xung quanh keyword
+                                            const index = textLower.indexOf(keyword);
+                                            const start = Math.max(0, index - 50);
+                                            const end = Math.min(text.length, index + keyword.length + 50);
+                                            const companySnippet = text.substring(start, end).trim();
+                                            
+                                            if (companySnippet.length > 10 && !results.companies.includes(companySnippet)) {
+                                                results.companies.push(companySnippet);
+                                            }
+                                        }
+                                    });
+                                });
+                            } catch(e) {}
+                        });
+                        
+                        return JSON.stringify(results);
+                    })();
+                ";
+                
+                var resultJson = js.ExecuteScript(script) as string;
+                if (!string.IsNullOrWhiteSpace(resultJson))
+                {
+                    Console.WriteLine($"[AdLink] [ExtractContactInfo] Đã trích xuất contact info từ DOM");
+                    return resultJson;
+                }
+            }
+            catch (Exception ex)
+                    {
+                Console.WriteLine($"[AdLink] [ExtractContactInfo] Lỗi: {ex.Message}");
+            }
+            return "{}";
+        }
+
+        /// <summary>
+        /// Đợi tất cả animations và transitions hoàn tất
+        /// </summary>
+        private static void WaitForAnimations(IWebDriver driver)
+        {
+            try
+            {
+                var js = (IJavaScriptExecutor)driver;
+                var script = @"
+                    (function() {
+                        return new Promise((resolve) => {
+                            // Đợi tất cả animations
+                            const animations = document.getAnimations();
+                            if (animations.length === 0) {
+                                resolve();
+                                return;
+                            }
+                            
+                            Promise.all(animations.map(anim => anim.finished)).then(() => {
+                                // Đợi thêm một chút để đảm bảo
+                                setTimeout(resolve, 300);
+                            });
+                        });
+                    })();
+                ";
+                
+                try
+                {
+                    js.ExecuteAsyncScript(script);
+                }
+                catch
+                {
+                    // Fallback nếu async script không hoạt động
+                }
+                System.Threading.Thread.Sleep(500); // Fallback
+            }
+            catch
+            {
+                System.Threading.Thread.Sleep(1000); // Fallback nếu async script không hoạt động
+            }
+        }
+
+        /// <summary>
         /// Chụp toàn bộ màn hình trang web và chuyển sang base64 string
         /// Quy trình mới: Chụp 3 ảnh và ghép lại
         /// 1. Chụp ảnh đầu tiên khi vào trang (đầu trang)
@@ -2038,106 +2614,39 @@ namespace ConsummerScreenPageBot
         /// 
         /// Tham số:
         /// - driver: WebDriver
+        /// - contactInfoJson: Output parameter chứa contact info trích xuất từ DOM
         /// - jpegQuality: Chất lượng JPEG (1-100, mặc định 80)
         /// 
         /// Trả về: Base64 string của ảnh đã ghép, hoặc chuỗi rỗng nếu lỗi
         /// </summary>
-        private static string CaptureFullPageScreenshotAsBase64(IWebDriver driver, long jpegQuality = 80)
+        private static string CaptureFullPageScreenshotAsBase64(IWebDriver driver, out string contactInfoJson, long jpegQuality = 80)
         {
+            contactInfoJson = "{}";
             string? originalUrl = null;
             try
-            {
-                Console.WriteLine($"[AdLink] [CaptureFullPage] Bắt đầu quy trình chụp 3 ảnh và ghép lại...");
+                    {
+                Console.WriteLine($"[AdLink] [CaptureFullPage] Bắt đầu quy trình chụp ảnh và ghép lại...");
+                
+                // Kiểm tra xem có phải là error page không
+                if (IsErrorPage(driver))
+                {
+                    Console.WriteLine($"[AdLink] [CaptureFullPage] ⚠ Phát hiện error page, bỏ qua không chụp screenshot");
+                    return "";
+                }
+                
                 var js = (IJavaScriptExecutor)driver;
                 originalUrl = driver.Url;
                 
                 var screenshots = new List<byte[]>();
                 
-                // ========== BƯỚC 1: Chụp ảnh đầu tiên - màn hình cơ sở 1 (đầu trang) ==========
-                Console.WriteLine($"[AdLink] [CaptureFullPage] Bước 1: Chụp ảnh đầu tiên (màn hình cơ sở 1 - đầu trang)...");
-                
-                // Scroll lên đầu trang
-                try { js.ExecuteScript("window.scrollTo(0, 0);"); } catch { }
-                System.Threading.Thread.Sleep(300);
-                
-                // Thử đóng popup nếu có
-                TryClosePopup(driver);
-                
-                // Nếu tìm thấy email/sđt thì scroll tới đó trước khi chụp
-                var contactScrolled = TryScrollToContactInfo(driver);
-                if (!contactScrolled)
-                {
-                    try { js.ExecuteScript("window.scrollTo(0, 0);"); } catch { }
-                }
-                
-                // Chụp ảnh đầu tiên
-                try
-                {
-                    var topBytes = ((ITakesScreenshot)driver).GetScreenshot().AsByteArray;
-                    if (topBytes != null && topBytes.Length > 0)
-                    {
-                        screenshots.Add(topBytes);
-                        Console.WriteLine($"[AdLink] [CaptureFullPage] Đã chụp ảnh 1, kích thước: {topBytes.Length} bytes");
-                    }
-                    else
-                    {
-                        Console.WriteLine($"[AdLink] [CaptureFullPage] WARNING: Không thể chụp ảnh 1");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[AdLink] [CaptureFullPage] Lỗi khi chụp ảnh 1: {ex.Message}");
-                }
-                
-                // ========== BƯỚC 2: Scroll tới cuối trang và chụp ảnh thứ 2 ==========
-                Console.WriteLine($"[AdLink] [CaptureFullPage] Bước 2: Scroll tới cuối trang và chụp ảnh thứ 2...");
-                
-                // Scroll xuống cuối trang và đảm bảo đã load nội dung lazy
-                ScrollToBottomAndEnsureLazyContent(driver, TimeSpan.FromSeconds(6));
-                ScrollViewportToBottom(driver);
-                var contactBottom = TryScrollToContactInfo(driver);
-                if (!contactBottom)
-                {
-                    var bottomReached = EnsureViewportAtBottom(driver);
-                    if (!bottomReached)
-                    {
-                        Console.WriteLine("[AdLink] [CaptureFullPage] Cảnh báo: chưa chắc chắn đang ở cuối trang, thử scroll thêm một lần nữa");
-                        ScrollViewportToBottom(driver);
-                        EnsureViewportAtBottom(driver);
-                    }
-                }
-                System.Threading.Thread.Sleep(300);
-                
-                // Thử đóng popup nếu có
-                TryClosePopup(driver);
-                
-                // Chụp ảnh thứ 2
-                try
-                {
-                    var bottomBytes = ((ITakesScreenshot)driver).GetScreenshot().AsByteArray;
-                    if (bottomBytes != null && bottomBytes.Length > 0)
-                    {
-                        screenshots.Add(bottomBytes);
-                        Console.WriteLine($"[AdLink] [CaptureFullPage] Đã chụp ảnh 2, kích thước: {bottomBytes.Length} bytes");
-                    }
-                    else
-                    {
-                        Console.WriteLine($"[AdLink] [CaptureFullPage] WARNING: Không thể chụp ảnh 2");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[AdLink] [CaptureFullPage] Lỗi khi chụp ảnh 2: {ex.Message}");
-                }
-                
-                // ========== BƯỚC 3: Kiểm tra có menu /lien-he không, nếu có thì chụp ảnh thứ 3 ==========
-                Console.WriteLine($"[AdLink] [CaptureFullPage] Bước 3: Kiểm tra menu /lien-he...");
+                // ========== BƯỚC 0: KIỂM TRA VÀ ƯU TIÊN CHỤP TRANG /lien-he TRƯỚC ==========
+                Console.WriteLine($"[AdLink] [CaptureFullPage] Bước 0: Kiểm tra và ưu tiên chụp trang /lien-he...");
                 
                 if (HasLienHeMenu(driver, out var lienHeUrl) && !string.IsNullOrWhiteSpace(lienHeUrl))
                 {
                     try
                     {
-                        Console.WriteLine($"[AdLink] [CaptureFullPage] Tìm thấy menu /lien-he, đang chuyển sang: {lienHeUrl}");
+                        Console.WriteLine($"[AdLink] [CaptureFullPage] ✓ Tìm thấy menu /lien-he, ƯU TIÊN chụp trang này trước: {lienHeUrl}");
                         
                         // Navigate tới trang /lien-he
                         if (TryNavigate(driver, lienHeUrl, TimeSpan.FromSeconds(30), out var navFailReason))
@@ -2145,38 +2654,133 @@ namespace ConsummerScreenPageBot
                             Console.WriteLine($"[AdLink] [CaptureFullPage] Đã navigate tới trang /lien-he thành công");
                             System.Threading.Thread.Sleep(2000);
                             
-                            // Scroll lên đầu trang /lien-he (màn hình cơ sở 1)
+                            // Kiểm tra xem có phải là error page không
+                            if (IsErrorPage(driver))
+                            {
+                                Console.WriteLine($"[AdLink] [CaptureFullPage] ⚠ Phát hiện error page tại /lien-he, bỏ qua không chụp");
+                                // Quay lại trang gốc
+                                if (!string.IsNullOrWhiteSpace(originalUrl))
+                                {
+                                    TryNavigate(driver, originalUrl, TimeSpan.FromSeconds(30), out _);
+                                    System.Threading.Thread.Sleep(1000);
+                                }
+                                // Bỏ qua phần chụp /lien-he, tiếp tục chụp trang chính
+                            }
+                            else
+                            {
+                                // Scroll lên đầu trang /lien-he
                             try { js.ExecuteScript("window.scrollTo(0, 0);"); } catch { }
                             System.Threading.Thread.Sleep(300);
                             
+                            // Loại bỏ overlays và hiển thị hidden elements ở trang /lien-he
+                            RemoveOverlaysAndMasks(driver);
+                            RevealHiddenContactInfo(driver);
+                            WaitForAnimations(driver);
+                            
                             // Thử đóng popup nếu có
                             TryClosePopup(driver);
+                            System.Threading.Thread.Sleep(300);
+                            
+                            // Trích xuất contact info từ DOM (từ trang /lien-he - quan trọng nhất)
+                            var contactInfoLienHe = ExtractContactInfoFromDOM(driver);
+                            if (!string.IsNullOrWhiteSpace(contactInfoLienHe) && contactInfoLienHe != "{}")
+                            {
+                                contactInfoJson = contactInfoLienHe; // Gán trực tiếp vì đây là nguồn ưu tiên
+                                Console.WriteLine($"[AdLink] [CaptureFullPage] Đã trích xuất contact info từ trang /lien-he");
+                            }
+                            
                             TryScrollToContactInfo(driver);
                             
-                            // Chụp ảnh thứ 3
+                            // Chụp ảnh trang /lien-he (ưu tiên đầu tiên)
                             try
                             {
                                 var lienHeBytes = ((ITakesScreenshot)driver).GetScreenshot().AsByteArray;
                                 if (lienHeBytes != null && lienHeBytes.Length > 0)
                                 {
                                     screenshots.Add(lienHeBytes);
-                                    Console.WriteLine($"[AdLink] [CaptureFullPage] Đã chụp ảnh 3 (trang /lien-he), kích thước: {lienHeBytes.Length} bytes");
+                                    Console.WriteLine($"[AdLink] [CaptureFullPage] ✓ Đã chụp ảnh trang /lien-he (ưu tiên), kích thước: {lienHeBytes.Length} bytes");
                                 }
                                 else
                                 {
-                                    Console.WriteLine($"[AdLink] [CaptureFullPage] WARNING: Không thể chụp ảnh 3");
+                                    Console.WriteLine($"[AdLink] [CaptureFullPage] WARNING: Không thể chụp ảnh trang /lien-he");
                                 }
                             }
                             catch (Exception ex)
                             {
-                                Console.WriteLine($"[AdLink] [CaptureFullPage] Lỗi khi chụp ảnh 3: {ex.Message}");
+                                Console.WriteLine($"[AdLink] [CaptureFullPage] Lỗi khi chụp ảnh trang /lien-he: {ex.Message}");
                             }
                             
-                            // Quay lại trang gốc
-                            Console.WriteLine($"[AdLink] [CaptureFullPage] Quay lại trang gốc: {originalUrl}");
+                            // Scroll xuống cuối trang /lien-he để chụp thêm nếu có thông tin ở cuối
+                            ScrollToBottomAndEnsureLazyContent(driver, TimeSpan.FromSeconds(6));
+                            ScrollViewportToBottom(driver);
+                            System.Threading.Thread.Sleep(300);
+                            
+                            RemoveOverlaysAndMasks(driver);
+                            RevealHiddenContactInfo(driver);
+                            WaitForAnimations(driver);
+                            TryClosePopup(driver);
+                            System.Threading.Thread.Sleep(300);
+                            
+                            // Trích xuất thêm contact info từ cuối trang /lien-he
+                            var contactInfoLienHeBottom = ExtractContactInfoFromDOM(driver);
+                            if (!string.IsNullOrWhiteSpace(contactInfoLienHeBottom) && contactInfoLienHeBottom != "{}")
+                            {
+                                try
+                                {
+                                    var existingInfo = Newtonsoft.Json.JsonConvert.DeserializeObject<Newtonsoft.Json.Linq.JObject>(contactInfoJson ?? "{}");
+                                    var bottomInfo = Newtonsoft.Json.JsonConvert.DeserializeObject<Newtonsoft.Json.Linq.JObject>(contactInfoLienHeBottom);
+                                    if (existingInfo != null && bottomInfo != null)
+                                    {
+                                        foreach (var prop in bottomInfo.Properties())
+                                        {
+                                            if (prop.Value is Newtonsoft.Json.Linq.JArray bottomArray)
+                                            {
+                                                var existingArray = existingInfo[prop.Name] as Newtonsoft.Json.Linq.JArray;
+                                                if (existingArray == null)
+                                                {
+                                                    existingInfo[prop.Name] = new Newtonsoft.Json.Linq.JArray();
+                                                    existingArray = existingInfo[prop.Name] as Newtonsoft.Json.Linq.JArray;
+                                                }
+                                                if (existingArray != null)
+                                                {
+                                                    foreach (var item in bottomArray)
+                                                    {
+                                                        if (!existingArray.Any(x => x.ToString() == item.ToString()))
+                                                        {
+                                                            existingArray.Add(item);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        contactInfoJson = existingInfo.ToString(Newtonsoft.Json.Formatting.None);
+                                    }
+                                }
+                                catch { }
+                            }
+                            
+                            // Chụp ảnh cuối trang /lien-he
+                            try
+                            {
+                                var lienHeBottomBytes = ((ITakesScreenshot)driver).GetScreenshot().AsByteArray;
+                                if (lienHeBottomBytes != null && lienHeBottomBytes.Length > 0)
+                                {
+                                    screenshots.Add(lienHeBottomBytes);
+                                    Console.WriteLine($"[AdLink] [CaptureFullPage] ✓ Đã chụp ảnh cuối trang /lien-he, kích thước: {lienHeBottomBytes.Length} bytes");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[AdLink] [CaptureFullPage] Lỗi khi chụp ảnh cuối trang /lien-he: {ex.Message}");
+                            }
+                            
+                                // Quay lại trang gốc để chụp tiếp
+                                Console.WriteLine($"[AdLink] [CaptureFullPage] Quay lại trang gốc để chụp tiếp: {originalUrl}");
                             if (!string.IsNullOrWhiteSpace(originalUrl))
                             {
                                 TryNavigate(driver, originalUrl, TimeSpan.FromSeconds(30), out _);
+                                    System.Threading.Thread.Sleep(1000);
+                                }
                             }
                         }
                         else
@@ -2196,10 +2800,207 @@ namespace ConsummerScreenPageBot
                 }
                 else
                 {
-                    Console.WriteLine($"[AdLink] [CaptureFullPage] Không tìm thấy menu /lien-he, bỏ qua bước 3");
+                    Console.WriteLine($"[AdLink] [CaptureFullPage] Không tìm thấy menu /lien-he, tiếp tục chụp trang chính");
                 }
                 
-                // ========== BƯỚC 4: Ghép các ảnh lại và convert sang base64 ==========
+                // ========== BƯỚC 1: Chụp ảnh đầu tiên - màn hình cơ sở 1 (đầu trang chính) ==========
+                Console.WriteLine($"[AdLink] [CaptureFullPage] Bước 1: Chụp ảnh đầu trang chính...");
+                
+                // Scroll lên đầu trang
+                try { js.ExecuteScript("window.scrollTo(0, 0);"); } catch { }
+                System.Threading.Thread.Sleep(300);
+                
+                // THÊM MỚI: Loại bỏ overlays và hiển thị hidden elements
+                Console.WriteLine($"[AdLink] [CaptureFullPage] Loại bỏ overlays che mất thông tin...");
+                RemoveOverlaysAndMasks(driver);
+                RevealHiddenContactInfo(driver);
+                
+                // Đợi animations hoàn tất
+                WaitForAnimations(driver);
+                
+                // Thử đóng popup nếu có
+                TryClosePopup(driver);
+                System.Threading.Thread.Sleep(300); // Đợi thêm để đảm bảo DOM đã cập nhật
+                
+                // Trích xuất contact info từ DOM (từ trang chính - merge vào nếu chưa có)
+                var contactInfoMain = ExtractContactInfoFromDOM(driver);
+                if (!string.IsNullOrWhiteSpace(contactInfoMain) && contactInfoMain != "{}")
+                {
+                    try
+                    {
+                        var existingInfo = Newtonsoft.Json.JsonConvert.DeserializeObject<Newtonsoft.Json.Linq.JObject>(contactInfoJson ?? "{}");
+                        var mainInfo = Newtonsoft.Json.JsonConvert.DeserializeObject<Newtonsoft.Json.Linq.JObject>(contactInfoMain);
+                        if (existingInfo != null && mainInfo != null)
+                        {
+                            foreach (var prop in mainInfo.Properties())
+                            {
+                                if (prop.Value is Newtonsoft.Json.Linq.JArray mainArray)
+                                {
+                                    var existingArray = existingInfo[prop.Name] as Newtonsoft.Json.Linq.JArray;
+                                    if (existingArray == null)
+                                    {
+                                        existingInfo[prop.Name] = new Newtonsoft.Json.Linq.JArray();
+                                        existingArray = existingInfo[prop.Name] as Newtonsoft.Json.Linq.JArray;
+                                    }
+                                    if (existingArray != null)
+                                    {
+                                        foreach (var item in mainArray)
+                                        {
+                                            if (!existingArray.Any(x => x.ToString() == item.ToString()))
+                                            {
+                                                existingArray.Add(item);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            contactInfoJson = existingInfo.ToString(Newtonsoft.Json.Formatting.None);
+                        }
+                    }
+                    catch { }
+                }
+                
+                // Nếu tìm thấy email/sđt thì scroll tới đó trước khi chụp
+                var contactScrolled = TryScrollToContactInfo(driver);
+                if (!contactScrolled)
+                {
+                    try { js.ExecuteScript("window.scrollTo(0, 0);"); } catch { }
+                }
+                
+                // Chụp ảnh đầu tiên
+                try
+                {
+                    var topBytes = ((ITakesScreenshot)driver).GetScreenshot().AsByteArray;
+                    if (topBytes != null && topBytes.Length > 0)
+                    {
+                        screenshots.Add(topBytes);
+                        Console.WriteLine($"[AdLink] [CaptureFullPage] Đã chụp ảnh đầu trang chính, kích thước: {topBytes.Length} bytes");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[AdLink] [CaptureFullPage] WARNING: Không thể chụp ảnh đầu trang chính");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[AdLink] [CaptureFullPage] Lỗi khi chụp ảnh 1: {ex.Message}");
+                }
+                
+                // ========== BƯỚC 2: Scroll tới cuối trang chính và chụp ảnh ==========
+                Console.WriteLine($"[AdLink] [CaptureFullPage] Bước 2: Scroll tới cuối trang chính và chụp ảnh...");
+                
+                // Scroll xuống cuối trang và đảm bảo đã load nội dung lazy
+                ScrollToBottomAndEnsureLazyContent(driver, TimeSpan.FromSeconds(6));
+                ScrollViewportToBottom(driver);
+                var contactBottom = TryScrollToContactInfo(driver);
+                if (!contactBottom)
+                {
+                    var bottomReached = EnsureViewportAtBottom(driver);
+                    if (!bottomReached)
+                    {
+                        Console.WriteLine("[AdLink] [CaptureFullPage] Cảnh báo: chưa chắc chắn đang ở cuối trang, thử scroll thêm một lần nữa");
+                        ScrollViewportToBottom(driver);
+                        EnsureViewportAtBottom(driver);
+                    }
+                }
+                System.Threading.Thread.Sleep(300);
+                
+                // THÊM MỚI: Loại bỏ overlays và hiển thị hidden elements ở cuối trang
+                RemoveOverlaysAndMasks(driver);
+                RevealHiddenContactInfo(driver);
+                WaitForAnimations(driver);
+                
+                // Thử đóng popup nếu có
+                TryClosePopup(driver);
+                System.Threading.Thread.Sleep(300);
+                
+                // THÊM MỚI: Trích xuất contact info từ DOM (lần 2 - ở cuối trang)
+                var contactInfoBottom = ExtractContactInfoFromDOM(driver);
+                bool shouldRecapture = false;
+                if (!string.IsNullOrWhiteSpace(contactInfoBottom) && contactInfoBottom != "{}")
+                {
+                    // Merge contact info từ cuối trang vào kết quả
+                    try
+                    {
+                        var existingInfo = Newtonsoft.Json.JsonConvert.DeserializeObject<Newtonsoft.Json.Linq.JObject>(contactInfoJson ?? "{}");
+                        var bottomInfo = Newtonsoft.Json.JsonConvert.DeserializeObject<Newtonsoft.Json.Linq.JObject>(contactInfoBottom);
+                        if (existingInfo != null && bottomInfo != null)
+                        {
+                            // Merge arrays (emails, phones, addresses)
+                            foreach (var prop in bottomInfo.Properties())
+                            {
+                                if (prop.Value is Newtonsoft.Json.Linq.JArray bottomArray)
+                                {
+                                    var existingArray = existingInfo[prop.Name] as Newtonsoft.Json.Linq.JArray;
+                                    if (existingArray == null)
+                                    {
+                                        existingInfo[prop.Name] = new Newtonsoft.Json.Linq.JArray();
+                                        existingArray = existingInfo[prop.Name] as Newtonsoft.Json.Linq.JArray;
+                                    }
+                                    foreach (var item in bottomArray)
+                                    {
+                                        if (!existingArray.Any(x => x.ToString() == item.ToString()))
+                                        {
+                                            existingArray.Add(item);
+                                        }
+                                    }
+                                }
+                            }
+                            contactInfoJson = existingInfo.ToString(Newtonsoft.Json.Formatting.None);
+                            
+                            // THÊM MỚI: Kiểm tra nếu có contact info (email/phone/address/company/MST) thì cần chụp lại
+                            var hasEmails = (bottomInfo["emails"] as Newtonsoft.Json.Linq.JArray)?.Count > 0;
+                            var hasPhones = (bottomInfo["phones"] as Newtonsoft.Json.Linq.JArray)?.Count > 0;
+                            var hasAddresses = (bottomInfo["addresses"] as Newtonsoft.Json.Linq.JArray)?.Count > 0;
+                            var hasCompanies = (bottomInfo["companies"] as Newtonsoft.Json.Linq.JArray)?.Count > 0;
+                            var hasMsts = (bottomInfo["msts"] as Newtonsoft.Json.Linq.JArray)?.Count > 0;
+                            
+                            if (hasEmails || hasPhones || hasAddresses || hasCompanies || hasMsts)
+                            {
+                                Console.WriteLine($"[AdLink] [CaptureFullPage] Phát hiện contact info ở cuối trang - Emails: {hasEmails}, Phones: {hasPhones}, Addresses: {hasAddresses}, Companies: {hasCompanies}, MSTs: {hasMsts}");
+                                Console.WriteLine($"[AdLink] [CaptureFullPage] Scroll lại tới contact info và chụp lại...");
+                                shouldRecapture = true;
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                
+                // Nếu có contact info, scroll lại và chụp lại
+                if (shouldRecapture)
+                {
+                    var contactScrolledAgain = TryScrollToContactInfo(driver);
+                    if (contactScrolledAgain)
+                    {
+                        System.Threading.Thread.Sleep(300);
+                        RemoveOverlaysAndMasks(driver);
+                        RevealHiddenContactInfo(driver);
+                        WaitForAnimations(driver);
+                        TryClosePopup(driver);
+                        System.Threading.Thread.Sleep(300);
+                    }
+                }
+                
+                // Chụp ảnh thứ 2
+                try
+                {
+                    var bottomBytes = ((ITakesScreenshot)driver).GetScreenshot().AsByteArray;
+                    if (bottomBytes != null && bottomBytes.Length > 0)
+                    {
+                        screenshots.Add(bottomBytes);
+                        Console.WriteLine($"[AdLink] [CaptureFullPage] Đã chụp ảnh cuối trang chính, kích thước: {bottomBytes.Length} bytes");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[AdLink] [CaptureFullPage] WARNING: Không thể chụp ảnh cuối trang chính");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[AdLink] [CaptureFullPage] Lỗi khi chụp ảnh 2: {ex.Message}");
+                }
+                
+                // ========== BƯỚC 3: Ghép các ảnh lại và convert sang base64 ==========
                 if (screenshots.Count == 0)
                 {
                     Console.WriteLine($"[AdLink] [CaptureFullPage] ERROR: Không có ảnh nào để ghép");
@@ -2249,16 +3050,104 @@ namespace ConsummerScreenPageBot
                             Console.WriteLine($"[AdLink] [CaptureFullPage] Đã vẽ ảnh tại Y={currentY - img.Height}");
                         }
                         
-                        // Nén và convert sang base64
-                        Console.WriteLine($"[AdLink] [CaptureFullPage] Nén ảnh và convert sang base64 với quality={jpegQuality}...");
-                        using (var outputMs = new MemoryStream())
+                        // Resize và nén ảnh để giảm dung lượng xuống dưới 800KB
+                        // Đồng thời đảm bảo ảnh trong khoảng 384x384 đến 768x768 (tối ưu token Gemini)
+                        Console.WriteLine($"[AdLink] [CaptureFullPage] Resize và nén ảnh (target: <800KB, optimize for Gemini: 384-768px)...");
+                        
+                        // Gemini API token optimization:
+                        // - Ảnh ≤ 384x384: 258 token (1 ảnh)
+                        // - Ảnh > 768x768: Gemini chia thành các ô 768x768, mỗi ô = 258 token
+                        // - Tối ưu: Giữ ảnh trong khoảng 384x384 đến 768x768 để tối đa 258 token/ảnh
+                        const int minDimension = 384;  // Giữ chất lượng tối thiểu
+                        const int maxDimension = 768;  // Tránh bị chia nhỏ bởi Gemini
+                        
+                        // Tính scale factor để fit trong 768x768 (tránh bị chia nhỏ)
+                        double scaleForMax = Math.Min(
+                            (double)maxDimension / maxWidth,
+                            (double)maxDimension / totalHeight
+                        );
+                        
+                        // Đảm bảo không < 384x384 (giữ chất lượng tối thiểu)
+                        double scaleForMin = Math.Max(
+                            (double)minDimension / maxWidth,
+                            (double)minDimension / totalHeight
+                        );
+                        
+                        // Scale factor ban đầu để giảm dung lượng (target: <800KB)
+                        double scaleForSize = 0.7; // Giảm 30% kích thước
+                        
+                        // Ước tính và điều chỉnh nếu vẫn quá lớn
+                        long estimatedSize = (long)(maxWidth * scaleForSize * totalHeight * scaleForSize * 3 * 0.3); // ~30% của ảnh RGB sau nén
+                        int maxRetries = 3;
+                        int retry = 0;
+                        
+                        while (estimatedSize > 800 * 1024 && retry < maxRetries)
                         {
-                            var encoder = new JpegEncoder { Quality = (int)Math.Clamp(jpegQuality, 1, 100) };
-                            mergedImage.Save(outputMs, encoder);
-                            var compressedBytes = outputMs.ToArray();
-                            string base64Result = Convert.ToBase64String(compressedBytes);
-                            Console.WriteLine($"[AdLink] [CaptureFullPage] SUCCESS: Đã ghép {images.Count} ảnh, kích thước sau nén: {compressedBytes.Length} bytes, base64: {base64Result.Length} ký tự");
-                            return base64Result;
+                            scaleForSize *= 0.85; // Giảm thêm 15% mỗi lần
+                            estimatedSize = (long)(maxWidth * scaleForSize * totalHeight * scaleForSize * 3 * 0.3);
+                            retry++;
+                            Console.WriteLine($"[AdLink] [CaptureFullPage] Ước tính size vẫn lớn ({estimatedSize / 1024}KB), giảm scale xuống {scaleForSize:F2}...");
+                        }
+                        
+                        // Scale factor cuối cùng: đảm bảo trong khoảng min-max và target size
+                        double finalScale = Math.Max(scaleForMin, Math.Min(scaleForMax, scaleForSize));
+                        
+                        // Tính kích thước cuối cùng
+                        int targetWidth = (int)Math.Round(maxWidth * finalScale);
+                        int targetHeight = (int)Math.Round(totalHeight * finalScale);
+                        
+                        // Đảm bảo không vượt quá giới hạn Gemini (768x768)
+                        if (targetWidth > maxDimension || targetHeight > maxDimension)
+                        {
+                            double maxScale = Math.Min((double)maxDimension / targetWidth, (double)maxDimension / targetHeight);
+                            targetWidth = (int)Math.Round(targetWidth * maxScale);
+                            targetHeight = (int)Math.Round(targetHeight * maxScale);
+                            Console.WriteLine($"[AdLink] [CaptureFullPage] Điều chỉnh để không vượt quá {maxDimension}x{maxDimension}: {targetWidth}x{targetHeight}");
+                        }
+                        
+                        // Đảm bảo không nhỏ hơn tối thiểu (384x384) - nhưng nếu ảnh gốc nhỏ thì giữ nguyên
+                        if (targetWidth < minDimension && maxWidth >= minDimension)
+                        {
+                            targetWidth = minDimension;
+                            targetHeight = (int)Math.Round(totalHeight * (double)minDimension / maxWidth);
+                            Console.WriteLine($"[AdLink] [CaptureFullPage] Điều chỉnh để không nhỏ hơn {minDimension}px width: {targetWidth}x{targetHeight}");
+                        }
+                        if (targetHeight < minDimension && totalHeight >= minDimension)
+                        {
+                            targetHeight = minDimension;
+                            targetWidth = (int)Math.Round(maxWidth * (double)minDimension / totalHeight);
+                            Console.WriteLine($"[AdLink] [CaptureFullPage] Điều chỉnh để không nhỏ hơn {minDimension}px height: {targetWidth}x{targetHeight}");
+                        }
+                        
+                        // Giảm JPEG quality để giảm thêm dung lượng (60 thay vì 70-80)
+                        int finalQuality = Math.Min(60, (int)Math.Clamp(jpegQuality, 1, 100));
+                        
+                        Console.WriteLine($"[AdLink] [CaptureFullPage] Resize từ {maxWidth}x{totalHeight} xuống {targetWidth}x{targetHeight} (scale={finalScale:F2}), quality={finalQuality}");
+                        Console.WriteLine($"[AdLink] [CaptureFullPage] Kích thước cuối cùng: {targetWidth}x{targetHeight} (Gemini optimal: {minDimension}-{maxDimension}px, target: 258 tokens)");
+                        
+                        using (var resizedImage = mergedImage.Clone(ctx => ctx.Resize(new ResizeOptions
+                        {
+                            Mode = ResizeMode.Stretch,
+                            Size = new Size(Math.Max(1, targetWidth), Math.Max(1, targetHeight))
+                        })))
+                        {
+                            using (var outputMs = new MemoryStream())
+                            {
+                                var encoder = new JpegEncoder { Quality = finalQuality };
+                                resizedImage.Save(outputMs, encoder);
+                                var compressedBytes = outputMs.ToArray();
+                                string base64Result = Convert.ToBase64String(compressedBytes);
+                                
+                                double sizeInKB = compressedBytes.Length / 1024.0;
+                                Console.WriteLine($"[AdLink] [CaptureFullPage] SUCCESS: Đã ghép {images.Count} ảnh, kích thước sau nén: {compressedBytes.Length} bytes ({sizeInKB:F2}KB), base64: {base64Result.Length} ký tự");
+                                
+                                if (compressedBytes.Length > 800 * 1024)
+                                {
+                                    Console.WriteLine($"[AdLink] [CaptureFullPage] WARNING: Kích thước vẫn >800KB ({sizeInKB:F2}KB), có thể cần giảm quality hoặc scale thêm");
+                                }
+                                
+                                return base64Result;
+                            }
                         }
                     }
                 }
@@ -2794,14 +3683,21 @@ namespace ConsummerScreenPageBot
         /// - screenshotBase64: Base64 string của screenshot (từ CaptureFullPageScreenshot)
         /// - jobParamsSnapshot: Thông tin từ job gốc (RabbitQueue) để merge vào payload
         /// </summary>
-        private static void PushIframeToQueue(string linkClick, string screenshotBase64, JObject? jobParamsSnapshot = null)
+        private static void PushIframeToQueue(string linkClick, string screenshotBase64, JObject? jobParamsSnapshot = null, string contactInfoJson = "{}")
         {
+            Console.WriteLine($"[Iframe] ========== HÀM PushIframeToQueue ĐƯỢC GỌI ==========");
+            Console.WriteLine($"[Iframe] Timestamp: {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}");
+            Console.WriteLine($"[Iframe] LinkClick: '{linkClick}'");
+            Console.WriteLine($"[Iframe] ScreenshotBase64 Length: {(screenshotBase64?.Length ?? 0)}");
+            Console.WriteLine($"[Iframe] ContactInfoJson Length: {(contactInfoJson?.Length ?? 0)}");
+            Console.WriteLine($"[Iframe] JobParamsSnapshot IsNull: {jobParamsSnapshot == null}");
+            
             try
             {
             
                 // Gửi link tới queue screen link để job chụp ảnh từ link click xử lý
                 var targetQueue = RabbitQueueScreenLink; // Queue name này dùng để nhận dữ liệu từ link click banner
-                Console.WriteLine($"[Iframe] Chuẩn bị push queue. Queue='{targetQueue}', Link='{linkClick}', ScreenshotLen={(screenshotBase64?.Length ?? 0)}");
+                Console.WriteLine($"[Iframe] Chuẩn bị push queue. Queue='{targetQueue}', Link='{linkClick}', ScreenshotLen={(screenshotBase64?.Length ?? 0)}, ContactInfoLen={(contactInfoJson?.Length ?? 0)}");
                 
                 if (string.IsNullOrWhiteSpace(linkClick))
                 {
@@ -2812,6 +3708,12 @@ namespace ConsummerScreenPageBot
                 if (string.IsNullOrWhiteSpace(targetQueue))
                 {
                     Console.WriteLine("[Iframe] RabbitQueueScreenLink chưa được cấu hình, không thể push");
+                    return;
+                }
+                
+                if (string.IsNullOrWhiteSpace(screenshotBase64))
+                {
+                    Console.WriteLine("[Iframe] Screenshot rỗng, bỏ qua không push vào queue");
                     return;
                 }
                 
@@ -2833,9 +3735,10 @@ namespace ConsummerScreenPageBot
                     mergedPayload = new JObject();
                 }
                 
-                // Thêm link_click_banner, screenshot_base64 và page_source (ghi đè nếu có trong job params)
+                // Thêm link_click_banner, screenshot_base64, contact_info_extracted và page_source (ghi đè nếu có trong job params)
                 mergedPayload["link_click_banner"] = linkClick ?? "";
                 mergedPayload["screenshot_base64"] = screenshotBase64 ?? "";
+                mergedPayload["contact_info_extracted"] = contactInfoJson ?? "{}";
                 
                 var jsonPayload = mergedPayload.ToString(Newtonsoft.Json.Formatting.None);
                 var body = Encoding.UTF8.GetBytes(jsonPayload);
@@ -2862,12 +3765,56 @@ namespace ConsummerScreenPageBot
                 var props = iframeChannel.CreateBasicProperties();
                 props.Persistent = true;
                 
+                // ========== LOG CHI TIẾT TRƯỚC KHI PUSH VÀO QUEUE ==========
+                Console.WriteLine($"[Iframe] ========== BẮT ĐẦU PUSH VÀO QUEUE ==========");
+                Console.WriteLine($"[Iframe] Timestamp: {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}");
+                Console.WriteLine($"[Iframe] Queue Name: '{targetQueue}'");
+                Console.WriteLine($"[Iframe] Routing Key: '{targetQueue}'");
+                Console.WriteLine($"[Iframe] Exchange: '' (default)");
+                Console.WriteLine($"[Iframe] Body Size: {body.Length} bytes");
+                Console.WriteLine($"[Iframe] Link Click: {linkClick}");
+                Console.WriteLine($"[Iframe] Link Click Length: {linkClick?.Length ?? 0}");
+                Console.WriteLine($"[Iframe] Screenshot Base64 Length: {(screenshotBase64?.Length ?? 0)}");
+                Console.WriteLine($"[Iframe] Contact Info Length: {(contactInfoJson?.Length ?? 0)}");
+                Console.WriteLine($"[Iframe] Persistent: {props.Persistent}");
+                Console.WriteLine($"[Iframe] Channel IsOpen: {iframeChannel.IsOpen}");
+                Console.WriteLine($"[Iframe] Channel IsNull: {iframeChannel == null}");
+                Console.WriteLine($"[Iframe] Connection IsOpen: {(iframeConnection?.IsOpen ?? false)}");
+                
+                // Log một phần payload để debug (cắt ngắn nếu quá dài)
+                try
+                {
+                    var payloadPreview = jsonPayload.Length > 500 
+                        ? jsonPayload.Substring(0, 500) + "... [truncated]" 
+                        : jsonPayload;
+                    Console.WriteLine($"[Iframe] Payload Preview (first 500 chars): {payloadPreview}");
+                }
+                catch (Exception logEx)
+                {
+                    Console.WriteLine($"[Iframe] Không thể log payload preview: {logEx.Message}");
+                }
+                
+                // Log các keys trong payload
+                try
+                {
+                    var payloadKeys = string.Join(", ", mergedPayload.Properties().Select(p => p.Name));
+                    Console.WriteLine($"[Iframe] Payload Keys: [{payloadKeys}]");
+                }
+                catch (Exception logEx)
+                {
+                    Console.WriteLine($"[Iframe] Không thể log payload keys: {logEx.Message}");
+                }
+                
+                Console.WriteLine($"[Iframe] Sẵn sàng gọi BasicPublish...");
+                
                 iframeChannel.BasicPublish(exchange: "",
                                           routingKey: targetQueue,
                                           basicProperties: props,
                                           body: body);
                 
+                Console.WriteLine($"[Iframe] ========== ĐÃ PUSH THÀNH CÔNG VÀO QUEUE ==========");
                 Console.WriteLine($"[Iframe] Đã push vào queue '{targetQueue}' - Link: {linkClick}, Size: {body.Length} bytes");
+                Console.WriteLine($"[Iframe] Timestamp sau khi push: {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}");
             }
             catch (Exception ex)
             {

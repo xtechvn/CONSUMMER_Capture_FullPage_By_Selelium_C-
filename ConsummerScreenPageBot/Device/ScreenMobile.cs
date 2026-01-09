@@ -5,11 +5,13 @@ using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using ConsummerScreenPageBot.Utils;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using SixLabors.ImageSharp.Formats.Jpeg;
 
 namespace ConsummerScreenPageBot.Device
 {
@@ -70,21 +72,23 @@ namespace ConsummerScreenPageBot.Device
         }
 
         /// <summary>
-        /// Chụp ảnh trang web bằng cách chia thành nhiều segment (phần) và chụp từng phần - Mobile
+        /// Chụp ảnh trang web bằng cách chia thành nhiều segment (phần) và chụp từng phần bằng cách scroll đến từng vị trí - Mobile
         /// 
         /// Viewport Mobile: 375x667, mobile: true
         /// 
         /// Cách thức hoạt động:
-        /// 1. Lấy kích thước thực tế của trang (width x height)
-        ///    - Giới hạn chiều cao tối đa 30000px
-        /// 2. Cuộn xuống cuối trang và đợi quảng cáo load hoàn toàn
-        /// 3. Chụp ảnh toàn trang một lần bằng CDP:
-        ///    - Đặt viewport theo kích thước tài liệu (mobile: true)
-        ///    - Chụp ảnh full page bằng Page.captureScreenshot
-        ///    - Nếu CDP fail => fallback về ITakesScreenshot
-        /// 4. Load ảnh full page vào ImageSharp để xử lý
-        /// 5. Chia ảnh thành N segment bằng nhau (slice)
-        /// 6. Reset viewport về kích thước ban đầu
+        /// 1. Scroll xuống cuối trang để kích hoạt lazy-load và đợi quảng cáo load hoàn toàn
+        /// 2. Scroll lên đầu trang để reset vị trí
+        /// 3. Tính chiều cao mỗi segment: totalHeight / segmentCount
+        /// 4. Với mỗi segment i:
+        ///    - Scroll đến vị trí Y = i * sliceHeight (đặt ở giữa viewport)
+        ///    - Đợi một chút để đảm bảo content đã render
+        ///    - Chụp viewport tại vị trí đó
+        ///    - Lưu và nén ảnh với chất lượng jpegQuality
+        ///    - Gửi ảnh lên queue analyze để AI xử lý
+        /// 5. Scroll lại lên đầu trang sau khi xong
+        /// 
+        /// Ưu điểm: Mỗi segment là ảnh chụp viewport riêng biệt khi scroll, đảm bảo không bỏ sót nội dung
         /// </summary>
         private static void CaptureSegmentScreenshots(IWebDriver driver, string hostLabel, int segmentCount, long jpegQuality)
         {
@@ -107,112 +111,99 @@ namespace ConsummerScreenPageBot.Device
                 // Delay thêm để đảm bảo tất cả banner quảng cáo đã render hoàn toàn
                 Thread.Sleep(2000);
                 
-                int pageWidth = MOBILE_WIDTH;
+                // Bước 3: Lấy chiều cao tổng của trang
                 int totalHeight = 3000;
+                int viewportHeight = 667; // Mobile viewport mặc định
                 try
                 {
-                    pageWidth = Convert.ToInt32(js.ExecuteScript("return Math.max(document.documentElement.scrollWidth, document.body.scrollWidth, window.innerWidth || 0);"));
                     totalHeight = Convert.ToInt32(js.ExecuteScript("return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight, window.innerHeight || 0);"));
+                    viewportHeight = Convert.ToInt32(js.ExecuteScript("return window.innerHeight || document.documentElement.clientHeight || 667;"));
                 }
                 catch { }
                 if (totalHeight <= 0) totalHeight = 3000;
                 totalHeight = Math.Min(totalHeight, 30000);
+                if (viewportHeight <= 0) viewportHeight = 667;
 
                 var shotsDir = Path.Combine(startupPath, "screenshots", hostLabel, "mobile");
                 if (!Directory.Exists(shotsDir)) Directory.CreateDirectory(shotsDir);
 
-                // 1) Chụp full page một lần bằng CDP; fallback sang ITakesScreenshot nếu cần
-                byte[] fullShotBytes = Array.Empty<byte>();
-                var chrome = driver as ChromeDriver;
-                bool fullOk = false;
-                if (chrome != null)
+                // Bước 4: Tính chiều cao mỗi segment và scroll đến từng vị trí để chụp
+                int sliceHeight = (int)Math.Ceiling((double)totalHeight / segmentCount);
+                Console.WriteLine($"[Mobile Segment] Total height: {totalHeight}px, Viewport height: {viewportHeight}px, Segment height: {sliceHeight}px");
+
+                // Scroll lên đầu trang trước khi bắt đầu
+                try { js.ExecuteScript("window.scrollTo(0, 0);"); } catch { }
+                Thread.Sleep(500);
+
+                for (int i = 0; i < segmentCount; i++)
                 {
-                    var metrics = new Dictionary<string, object>
-                    {
-                        { "mobile", true }, // Mobile
-                        { "width", Math.Max(1, pageWidth) },
-                        { "height", Math.Max(1, totalHeight) },
-                        { "deviceScaleFactor", 2 }, // Mobile thường có scale 2x hoặc 3x
-                        { "scale", 1 }
-                    };
-                    try { chrome.ExecuteCdpCommand("Emulation.setDeviceMetricsOverride", metrics); } catch { }
-
-                    try { chrome.ExecuteCdpCommand("Page.enable", new Dictionary<string, object>()); } catch { }
-
+                    // Tính vị trí Y để scroll đến (đặt vị trí segment ở giữa viewport)
+                    int targetY = i * sliceHeight;
+                    // Điều chỉnh để segment nằm ở giữa viewport
+                    int scrollY = Math.Max(0, targetY - (viewportHeight / 2));
+                    
+                    Console.WriteLine($"[Mobile Segment] Segment {i + 1}/{segmentCount}: Scroll to Y={scrollY} (target segment at Y={targetY})");
+                    
+                    // Scroll đến vị trí
                     try
                     {
-                        var args = new Dictionary<string, object>
-                        {
-                            { "format", "jpeg" },
-                            { "quality", 100 },
-                            { "captureBeyondViewport", true }
-                        };
-                        var result = chrome.ExecuteCdpCommand("Page.captureScreenshot", args) as IDictionary<string, object>;
-                        if (result != null && result.TryGetValue("data", out var dataObj) && dataObj is string base64)
-                        {
-                            fullShotBytes = Convert.FromBase64String(base64);
-                            fullOk = fullShotBytes != null && fullShotBytes.Length > 0;
-                        }
+                        js.ExecuteScript($"window.scrollTo(0, {scrollY});");
                     }
-                    catch { fullOk = false; }
-
-                    if (!fullOk)
+                    catch (Exception ex)
                     {
-                        try
-                        {
-                            var shot = ((ITakesScreenshot)driver).GetScreenshot();
-                            fullShotBytes = shot.AsByteArray;
-                            fullOk = fullShotBytes != null && fullShotBytes.Length > 0;
-                        }
-                        catch { fullOk = false; }
+                        Console.WriteLine($"[Mobile Segment] Error scrolling to {scrollY}: {ex.Message}");
                     }
-
-                    try { chrome.ExecuteCdpCommand("Emulation.clearDeviceMetricsOverride", new Dictionary<string, object>()); } catch { }
-                }
-                else
-                {
-                    // No CDP: best effort viewport screenshot
+                    
+                    // Đợi để đảm bảo content đã render
+                    Thread.Sleep(800);
+                    
+                    // Chụp viewport tại vị trí này
+                    byte[] segmentBytes = Array.Empty<byte>();
                     try
                     {
                         var shot = ((ITakesScreenshot)driver).GetScreenshot();
-                        fullShotBytes = shot.AsByteArray;
-                        fullOk = fullShotBytes != null && fullShotBytes.Length > 0;
+                        segmentBytes = shot.AsByteArray;
                     }
-                    catch { fullOk = false; }
-                }
-                if (!fullOk || fullShotBytes == null || fullShotBytes.Length == 0)
-                {
-                    throw new Exception("Failed to capture full page screenshot for slicing.");
-                }
-
-                // 2) Cắt ảnh theo N phần từ fullShotBytes, luôn đảm bảo phần cuối chứa phần còn lại (footer)
-                using (var ms = new MemoryStream(fullShotBytes))
-                using (var fullImg = Image.Load<Rgba32>(ms))
-                {
-                    int sliceHeight = (int)Math.Ceiling(fullImg.Height / (double)segmentCount);
-                    for (int i = 0; i < segmentCount; i++)
+                    catch (Exception ex)
                     {
-                        int y = i * sliceHeight;
-                        int currentHeight = Math.Min(sliceHeight, Math.Max(1, fullImg.Height - y));
-                        if (currentHeight <= 0) break;
-
-                        using (var seg = fullImg.Clone(ctx => ctx.Crop(new SixLabors.ImageSharp.Rectangle(0, y, fullImg.Width, currentHeight))))
+                        Console.WriteLine($"[Mobile Segment] Error capturing segment {i + 1}: {ex.Message}");
+                        continue;
+                    }
+                    
+                    if (segmentBytes == null || segmentBytes.Length == 0)
+                    {
+                        Console.WriteLine($"[Mobile Segment] WARNING: Segment {i + 1} screenshot is empty");
+                        continue;
+                    }
+                    
+                    // Load ảnh và lưu
+                    try
+                    {
+                        using (var ms = new MemoryStream(segmentBytes))
+                        using (var img = Image.Load<Rgba32>(ms))
                         {
                             var fileName = $"mobile_split{i+1}_{DateTime.Now:yyyyMMdd_HHmmss_fff}_{Guid.NewGuid().ToString("N").Substring(0,6)}.jpg";
                             var savePath = Path.Combine(shotsDir, fileName);
-                            AdCapture.SaveImageCompressed(seg, savePath, 1.0, jpegQuality);
-
-                            try
-                            {
-                                var compressedBytes = File.ReadAllBytes(savePath);
-                                try { Console.WriteLine($"[Mobile Segment] Saved {Path.GetFileName(savePath)} ({compressedBytes.Length} bytes)"); } catch { }
-                                // Truyền width và height của segment
-                                Program.TryPublishAnalyze(compressedBytes, seg.Width, seg.Height);
-                            }
-                            catch { }
+                            
+                            // Nén ảnh
+                            AdCapture.SaveImageCompressed(img, savePath, 1.0, jpegQuality);
+                            
+                            var compressedBytes = File.ReadAllBytes(savePath);
+                            Console.WriteLine($"[Mobile Segment] Saved segment {i + 1}/{segmentCount}: {Path.GetFileName(savePath)} ({compressedBytes.Length} bytes, {img.Width}x{img.Height}px)");
+                            
+                            // Gửi lên queue
+                            Program.TryPublishAnalyze(compressedBytes, img.Width, img.Height);
                         }
                     }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[Mobile Segment] Error processing segment {i + 1}: {ex.Message}");
+                        ErrorWriter.WriteLog(LogPath, "MobileSegmentScreenshots.Process", $"Segment {i + 1} - {hostLabel} => {ex}");
+                    }
                 }
+                
+                // Scroll lại lên đầu trang sau khi xong
+                try { js.ExecuteScript("window.scrollTo(0, 0);"); } catch { }
                 try { Console.WriteLine($"[Mobile Segment] Done host={hostLabel}"); } catch { }
                 
                 // Sau khi chụp segment xong, xử lý tất cả iframe và push vào queue
@@ -406,6 +397,364 @@ namespace ConsummerScreenPageBot.Device
             {
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Chụp viewport đầu trang (màn hình cơ sở 1) - dùng cho banner dạng U ngược
+        /// </summary>
+        private static byte[] CaptureViewportScreenshot(IWebDriver driver, long jpegQuality = 80)
+        {
+            try
+            {
+                // Scroll lên đầu trang
+                var js = (IJavaScriptExecutor)driver;
+                try { js.ExecuteScript("window.scrollTo(0, 0);"); } catch { }
+                Thread.Sleep(300);
+                
+                // Chụp viewport hiện tại
+                var chrome = driver as ChromeDriver;
+                if (chrome != null)
+                {
+                    try
+                    {
+                        var args = new Dictionary<string, object>
+                        {
+                            { "format", "jpeg" },
+                            { "quality", (int)Math.Clamp(jpegQuality, 1, 100) },
+                            { "captureBeyondViewport", false }  // Chỉ chụp viewport
+                        };
+                        var result = chrome.ExecuteCdpCommand("Page.captureScreenshot", args) as IDictionary<string, object>;
+                        if (result != null && result.TryGetValue("data", out var dataObj) && dataObj is string base64)
+                        {
+                            return Convert.FromBase64String(base64);
+                        }
+                    }
+                    catch { }
+                }
+                
+                // Fallback: ITakesScreenshot
+                try
+                {
+                    var shot = ((ITakesScreenshot)driver).GetScreenshot();
+                    return shot.AsByteArray;
+                }
+                catch { }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Mobile] Lỗi khi chụp viewport screenshot: {ex.Message}");
+            }
+            
+            return Array.Empty<byte>();
+        }
+
+        /// <summary>
+        /// Detect banner dạng chữ U ngược: banner trên + banner trái + banner phải (Mobile)
+        /// Mobile viewport nhỏ nên điều chỉnh ngưỡng cho phù hợp
+        /// </summary>
+        private static bool DetectUShapedBannerLayout(IWebDriver driver, List<(int Left, int Top, int Right, int Bottom)> bannerRects, int pageWidth, out (int Left, int Top, int Right, int Bottom)? uShapeBounds)
+        {
+            uShapeBounds = null;
+            try
+            {
+                // Phát hiện banner ở 3 vị trí: top, left, right
+                var topBanners = new List<(int Left, int Top, int Right, int Bottom)>();
+                var leftBanners = new List<(int Left, int Top, int Right, int Bottom)>();
+                var rightBanners = new List<(int Left, int Top, int Right, int Bottom)>();
+                
+                foreach (var rect in bannerRects)
+                {
+                    int width = rect.Right - rect.Left;
+                    int height = rect.Bottom - rect.Top;
+                    
+                    // Top banner: ở trên cùng (top < 400px), rộng >= 60% page width (mobile viewport nhỏ)
+                    if (rect.Top < 400 && width >= pageWidth * 0.6)
+                    {
+                        topBanners.Add(rect);
+                    }
+                    // Left sidebar: ở bên trái (left < 150px), không phải top banner (mobile viewport nhỏ)
+                    else if (rect.Left < 150 && rect.Top >= 150)
+                    {
+                        leftBanners.Add(rect);
+                    }
+                    // Right sidebar: ở bên phải (right > pageWidth - 150px), không phải top banner
+                    else if (rect.Right > pageWidth - 150 && rect.Top >= 150)
+                    {
+                        rightBanners.Add(rect);
+                    }
+                }
+                
+                // Kiểm tra có đủ 3 loại banner để tạo hình U ngược
+                if (topBanners.Count > 0 && (leftBanners.Count > 0 || rightBanners.Count > 0))
+                {
+                    // Lấy top banner đầu tiên
+                    var topBanner = topBanners.OrderBy(b => b.Top).First();
+                    
+                    // Tính bounds của U shape: từ top banner đến bottom của left/right banner
+                    int uTop = topBanner.Top;
+                    int uLeft = leftBanners.Count > 0 ? 0 : topBanner.Left;
+                    int uRight = pageWidth;
+                    int leftBottom = leftBanners.Count > 0 ? leftBanners.Max(b => b.Bottom) : 0;
+                    int rightBottom = rightBanners.Count > 0 ? rightBanners.Max(b => b.Bottom) : 0;
+                    int uBottom = Math.Max(topBanner.Bottom, Math.Max(leftBottom, rightBottom));
+                    
+                    // Chỉ coi là U shape nếu bottom >= 600px (mobile viewport nhỏ hơn desktop)
+                    if (uBottom >= 600)
+                    {
+                        uShapeBounds = (uLeft, uTop, uRight, uBottom);
+                        Console.WriteLine($"[Mobile] Detect U-shape banner: top={uTop}, bottom={uBottom}, left={uLeft}, right={uRight}");
+                        return true;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Mobile] Lỗi khi detect U-shape banner: {ex.Message}");
+            }
+            
+            return false;
+        }
+
+        /// <summary>
+        /// Gộp các banner gần nhau thành 1 ảnh để giảm số lượng request (tránh rate limit Gemini) - Mobile
+        /// 
+        /// Logic:
+        /// - Tính khoảng cách giữa các banner (theo cả X và Y)
+        /// - Nếu khoảng cách < mergeDistance: gộp thành 1 rect lớn hơn
+        /// - Giúp giảm số lượng request gửi vào Gemini API
+        /// - Mobile: mergeDistance nhỏ hơn (100px) vì viewport nhỏ
+        /// </summary>
+        private static List<(int Left, int Top, int Right, int Bottom)> MergeNearbyBanners(
+            List<(int Left, int Top, int Right, int Bottom)> bannerRects, 
+            int mergeDistance = 100)
+        {
+            var merged = new List<(int Left, int Top, int Right, int Bottom)>();
+            var processed = new HashSet<int>();
+            
+            try
+            {
+                // Sắp xếp banner theo vị trí (top trước, sau đó left)
+                var sortedBanners = bannerRects
+                    .Select((rect, index) => new { Rect = rect, Index = index })
+                    .OrderBy(x => x.Rect.Top)
+                    .ThenBy(x => x.Rect.Left)
+                    .ToList();
+                
+                for (int i = 0; i < sortedBanners.Count; i++)
+                {
+                    if (processed.Contains(sortedBanners[i].Index)) continue;
+                    
+                    var current = sortedBanners[i].Rect;
+                    var group = new List<(int Left, int Top, int Right, int Bottom)> { current };
+                    processed.Add(sortedBanners[i].Index);
+                    
+                    // Tìm các banner gần nhau (trong phạm vi mergeDistance)
+                    for (int j = i + 1; j < sortedBanners.Count; j++)
+                    {
+                        if (processed.Contains(sortedBanners[j].Index)) continue;
+                        
+                        var other = sortedBanners[j].Rect;
+                        
+                        // Tính khoảng cách ngắn nhất giữa 2 banner (từ cạnh đến cạnh)
+                        int distanceX = 0;
+                        int distanceY = 0;
+                        
+                        if (other.Right < current.Left)
+                            distanceX = current.Left - other.Right;
+                        else if (current.Right < other.Left)
+                            distanceX = other.Left - current.Right;
+                        // Nếu overlap hoặc gần nhau trên trục X: distanceX = 0
+                        
+                        if (other.Bottom < current.Top)
+                            distanceY = current.Top - other.Bottom;
+                        else if (current.Bottom < other.Top)
+                            distanceY = other.Top - current.Bottom;
+                        // Nếu overlap hoặc gần nhau trên trục Y: distanceY = 0
+                        
+                        // Khoảng cách tổng (Manhattan distance)
+                        int totalDistance = distanceX + distanceY;
+                        
+                        // Nếu khoảng cách < mergeDistance hoặc overlap: gộp lại
+                        if (totalDistance < mergeDistance || distanceX == 0 || distanceY == 0)
+                        {
+                            group.Add(other);
+                            processed.Add(sortedBanners[j].Index);
+                        }
+                    }
+                    
+                    // Gộp group thành 1 rect lớn hơn
+                    if (group.Count > 1)
+                    {
+                        int minLeft = group.Min(b => b.Left);
+                        int minTop = group.Min(b => b.Top);
+                        int maxRight = group.Max(b => b.Right);
+                        int maxBottom = group.Max(b => b.Bottom);
+                        merged.Add((minLeft, minTop, maxRight, maxBottom));
+                        Console.WriteLine($"[Mobile] Gộp {group.Count} banner gần nhau: ({group[0].Left},{group[0].Top}) -> ({minLeft},{minTop}) ~ ({maxRight},{maxBottom})");
+                    }
+                    else
+                    {
+                        merged.Add(current);
+                    }
+                }
+                
+                return merged;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Mobile] Lỗi khi merge banner: {ex.Message}");
+                ErrorWriter.WriteLog(LogPath, "MergeNearbyBanners", ex.ToString());
+                return bannerRects; // Fallback: trả về danh sách gốc
+            }
+        }
+
+        /// <summary>
+        /// Detect các vùng banner trên trang và trả về danh sách tọa độ (left, top, right, bottom) - Mobile
+        /// </summary>
+        private static List<(int Left, int Top, int Right, int Bottom)> DetectBannerRegions(IWebDriver driver)
+        {
+            var bannerRects = new List<(int Left, int Top, int Right, int Bottom)>();
+            try
+            {
+                var js = (IJavaScriptExecutor)driver;
+                
+                // Lấy scrollY để tính tọa độ tuyệt đối
+                long scrollY = 0;
+                try
+                {
+                    scrollY = Convert.ToInt64(js.ExecuteScript("return window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0;"));
+                }
+                catch { }
+                
+                // Detect iframes (thường là quảng cáo) - Mobile có ngưỡng nhỏ hơn
+                var iframeScript = @"
+                    const iframes = Array.from(document.querySelectorAll('iframe, frame'));
+                    const minW = 80, minH = 30;  // Mobile: giảm ngưỡng width xuống 80px
+                    const y = window.scrollY || window.pageYOffset || 0;
+                    const rects = [];
+                    
+                    for (const fr of iframes) {
+                        try {
+                            const r = fr.getBoundingClientRect();
+                            const w = Math.round(r.width);
+                            const h = Math.round(r.height);
+                            
+                            if (w >= minW && h >= minH) {
+                                const style = window.getComputedStyle(fr);
+                                if (style.display !== 'none' && style.visibility !== 'hidden') {
+                                    const left = Math.round(r.left);
+                                    const top = Math.round(r.top + y);
+                                    const right = Math.round(r.right);
+                                    const bottom = Math.round(r.bottom + y);
+                                    rects.push([left, top, right, bottom]);
+                                }
+                            }
+                        } catch(e) {}
+                    }
+                    return rects;
+                ";
+                
+                var iframeRects = js.ExecuteScript(iframeScript) as System.Collections.IEnumerable;
+                if (iframeRects != null)
+                {
+                    foreach (var item in iframeRects)
+                    {
+                        var rect = item as System.Collections.IList;
+                        if (rect != null && rect.Count >= 4)
+                        {
+                            int left = Convert.ToInt32(rect[0]);
+                            int top = Convert.ToInt32(rect[1]);
+                            int right = Convert.ToInt32(rect[2]);
+                            int bottom = Convert.ToInt32(rect[3]);
+                            if (right > left && bottom > top)
+                            {
+                                bannerRects.Add((left, top, right, bottom));
+                            }
+                        }
+                    }
+                }
+                
+                // Detect banner elements bằng CSS selector - Mobile có ngưỡng nhỏ hơn
+                var adSelectors = AdCapture.GetCommonAdSelectors();
+                var adSelectorScript = @"
+                    const selectors = arguments[0];
+                    const minW = 80, minH = 30;  // Mobile: giảm ngưỡng width xuống 80px
+                    const y = window.scrollY || window.pageYOffset || 0;
+                    const rects = [];
+                    const processed = new Set();
+                    
+                    for (const sel of selectors) {
+                        try {
+                            const elements = Array.from(document.querySelectorAll(sel));
+                            for (const el of elements) {
+                                const r = el.getBoundingClientRect();
+                                const w = Math.round(r.width);
+                                const h = Math.round(r.height);
+                                
+                                if (w >= minW && h >= minH) {
+                                    const style = window.getComputedStyle(el);
+                                    if (style.display !== 'none' && style.visibility !== 'hidden') {
+                                        const left = Math.round(r.left);
+                                        const top = Math.round(r.top + y);
+                                        const right = Math.round(r.right);
+                                        const bottom = Math.round(r.bottom + y);
+                                        
+                                        // Tránh trùng với iframe đã detect
+                                        let isDuplicate = false;
+                                        for (const existing of rects) {
+                                            if (Math.abs(existing[0] - left) < 10 && 
+                                                Math.abs(existing[1] - top) < 10 &&
+                                                Math.abs(existing[2] - right) < 10 &&
+                                                Math.abs(existing[3] - bottom) < 10) {
+                                                isDuplicate = true;
+                                                break;
+                                            }
+                                        }
+                                        
+                                        if (!isDuplicate) {
+                                            rects.push([left, top, right, bottom]);
+                                        }
+                                    }
+                                }
+                            }
+                        } catch(e) {}
+                    }
+                    
+                    return rects;
+                ";
+                
+                var adRects = js.ExecuteScript(adSelectorScript, adSelectors) as System.Collections.IEnumerable;
+                if (adRects != null)
+                {
+                    foreach (var item in adRects)
+                    {
+                        var rect = item as System.Collections.IList;
+                        if (rect != null && rect.Count >= 4)
+                        {
+                            int left = Convert.ToInt32(rect[0]);
+                            int top = Convert.ToInt32(rect[1]);
+                            int right = Convert.ToInt32(rect[2]);
+                            int bottom = Convert.ToInt32(rect[3]);
+                            if (right > left && bottom > top)
+                            {
+                                bannerRects.Add((left, top, right, bottom));
+                            }
+                        }
+                    }
+                }
+                
+                // Sắp xếp banner theo vị trí top (từ trên xuống)
+                bannerRects = bannerRects.OrderBy(r => r.Top).ToList();
+                
+                Console.WriteLine($"[Mobile] Detect được {bannerRects.Count} vùng banner");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Mobile] Lỗi khi detect banner: {ex.Message}");
+                ErrorWriter.WriteLog(LogPath, "DetectBannerRegions", ex.ToString());
+            }
+            
+            return bannerRects;
         }
     }
 }
